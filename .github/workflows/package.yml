@@ -37,8 +37,15 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO > xcodebuild_raw.log 2>&1 || (cat xcodebuild_raw.log && exit 1)
-          tail -n 40 xcodebuild_raw.log
+            COMPILER_INDEX_STORE_ENABLE=NO > xcodebuild_raw.log 2>&1 || {
+              echo "### ❌ Xcode 编译失败日志" >> $GITHUB_STEP_SUMMARY
+              echo '```text' >> $GITHUB_STEP_SUMMARY
+              tail -n 120 xcodebuild_raw.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              cat xcodebuild_raw.log
+              exit 1
+            }
+          tail -n 30 xcodebuild_raw.log
 
       - name: 上传构建日志 (Upload Raw Log)
         if: always()

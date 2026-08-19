@@ -76,6 +76,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 上传构建日志 (Upload Build Log if Failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: XcodeBuild-Error-Log
+          path: xcodebuild.log
+
       - name: 部署至 TestFlight (可选，需配置证书秘钥)
         if: ${{ inputs.upload_testflight == true && env.APPSTORE_PRIVATE_KEY != '' }}
         env:

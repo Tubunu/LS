@@ -37,7 +37,18 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO
+            COMPILER_INDEX_STORE_ENABLE=NO > xcodebuild_raw.log 2>&1 || true
+          
+          if grep -q "\*\* BUILD FAILED \*\*" xcodebuild_raw.log; then
+            echo "==================== XCODEBUILD COMPILATION ERRORS ===================="
+            grep -E "error:|fatal error:|BUILD FAILED" -B 2 -A 5 xcodebuild_raw.log || true
+            echo "==================== LAST 100 LINES OF LOG ===================="
+            tail -n 100 xcodebuild_raw.log
+            exit 1
+          else
+            echo "==================== BUILD SUCCEEDED ===================="
+            tail -n 30 xcodebuild_raw.log
+          fi
 
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |

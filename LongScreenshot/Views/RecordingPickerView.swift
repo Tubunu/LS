@@ -227,21 +227,27 @@ public struct RecordingPickerView: View {
                 generator.appliesPreferredTrackTransform = true
                 generator.maximumSize = CGSize(width: 400, height: 0)
                 
-                var thumbnailImage: UIImage? = nil
+                let thumbnailToSet: UIImage?
                 if let cgImage = try? await generator.image(at: .zero).image {
-                    thumbnailImage = UIImage(cgImage: cgImage)
+                    thumbnailToSet = UIImage(cgImage: cgImage)
+                } else {
+                    thumbnailToSet = nil
                 }
                 
-                var formattedDuration = ""
+                let durationToSet: String
                 if let duration {
                     let seconds = CMTimeGetSeconds(duration)
-                    formattedDuration = String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60)
+                    durationToSet = String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60)
+                } else {
+                    durationToSet = ""
                 }
                 
+                let targetURL = movie.url
+                
                 await MainActor.run {
-                    self.videoThumbnail = thumbnailImage
-                    self.videoURL = movie.url
-                    self.videoDuration = formattedDuration
+                    self.videoThumbnail = thumbnailToSet
+                    self.videoURL = targetURL
+                    self.videoDuration = durationToSet
                     self.isLoading = false
                 }
             } else {

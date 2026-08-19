@@ -35,10 +35,9 @@ public final class RecordingViewModel: ObservableObject {
                 from: url,
                 samplingFPS: samplingFPS
             ) { [weak self] currentProgress, message in
-                Task { @MainActor in
-                    self?.progress = currentProgress
-                    self?.statusMessage = message
-                }
+                guard let self else { return }
+                self.progress = currentProgress
+                self.statusMessage = message
             }
             
             guard frames.count >= 2 else {
@@ -49,10 +48,9 @@ public final class RecordingViewModel: ObservableObject {
             let displacements = try await scrollDetector.detectDisplacements(
                 frames: frames
             ) { [weak self] currentProgress, message in
-                Task { @MainActor in
-                    self?.progress = currentProgress
-                    self?.statusMessage = message
-                }
+                guard let self else { return }
+                self.progress = currentProgress
+                self.statusMessage = message
             }
             
             // Stage 3: Keyframe Decimation & Filtering (70% ~ 85%)
@@ -61,10 +59,9 @@ public final class RecordingViewModel: ObservableObject {
                 from: displacements,
                 config: config
             ) { [weak self] currentProgress, message in
-                Task { @MainActor in
-                    self?.progress = currentProgress
-                    self?.statusMessage = message
-                }
+                guard let self else { return }
+                self.progress = currentProgress
+                self.statusMessage = message
             }
             
             guard keyFrames.count >= 2 else {
@@ -85,10 +82,9 @@ public final class RecordingViewModel: ObservableObject {
                 keyFrames: keyFrames,
                 fixedRegions: fixedRegions
             ) { [weak self] currentProgress, message in
-                Task { @MainActor in
-                    self?.progress = currentProgress
-                    self?.statusMessage = message
-                }
+                guard let self else { return }
+                self.progress = currentProgress
+                self.statusMessage = message
             }
             
             self.resultImage = result

@@ -19,7 +19,7 @@ public actor ImageExporter {
     }
     
     /// Writes the image to a temporary file for external activity sharing
-    public func exportTemporaryFile(image: UIImage, format: OutputFormat = .png) throws -> URL {
+    nonisolated public func exportTemporaryFile(image: UIImage, format: OutputFormat = .png) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory
         let fileName = "LongScreenshot_\(Int(Date().timeIntervalSince1970)).\(format.fileExtension)"
         let fileURL = tempDir.appendingPathComponent(fileName)

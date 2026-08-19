@@ -14,7 +14,7 @@ public actor ScrollDetector {
     /// - Returns: Array of FrameDisplacement
     public func detectDisplacements(
         frames: [FrameData],
-        progressHandler: @Sendable (Double, String) -> Void
+        progressHandler: @Sendable @MainActor (Double, String) -> Void
     ) async throws -> [FrameDisplacement] {
         guard frames.count >= 2 else {
             throw RecordingError.insufficientFrames
@@ -70,7 +70,7 @@ public actor ScrollDetector {
             ))
             
             let currentProgress = 0.40 + (Double(i) / Double(count)) * 0.30
-            progressHandler(currentProgress, "正在分析滚动位移（\(i)/\(count - 1)）...")
+            await progressHandler(currentProgress, "正在分析滚动位移（\(i)/\(count - 1)）...")
         }
         
         return displacements

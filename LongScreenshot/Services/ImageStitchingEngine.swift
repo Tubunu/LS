@@ -17,14 +17,14 @@ public actor ImageStitchingEngine {
         _ images: [UIImage],
         config: CropConfig = .standard,
         blendWidth: Int = 40,
-        progressHandler: @Sendable (Double, String) -> Void
+        progressHandler: @Sendable @MainActor (Double, String) -> Void
     ) async throws -> UIImage {
         guard images.count >= 2 else {
             throw RecordingError.insufficientFrames
         }
         
         let totalCount = images.count
-        progressHandler(0.05, "正在预处理截图（共 \(totalCount) 张）...")
+        await progressHandler(0.05, "正在预处理截图（共 \(totalCount) 张）...")
         
         // 1. Preprocess screenshots to remove repeated status bar / home bars
         let preprocessed = imagePreprocessor.preprocessBatch(images, config: config)
@@ -40,7 +40,7 @@ public actor ImageStitchingEngine {
             guard let nextCG = preprocessed[i].cgImage else { continue }
             
             let pairProgress = 0.10 + (Double(i) / Double(totalCount)) * 0.75
-            progressHandler(pairProgress, "正在匹配拼接第 \(i + 1)/\(totalCount) 张截图...")
+            await progressHandler(pairProgress, "正在匹配拼接第 \(i + 1)/\(totalCount) 张截图...")
             
             guard let overlap = await overlapDetector.findOverlap(bottomOf: currentCanvasCG, topOf: nextCG) else {
                 // If overlap confidence is too low, fall back to direct stacking or error
@@ -71,9 +71,9 @@ public actor ImageStitchingEngine {
             currentCanvasCG = blendedCG
         }
         
-        progressHandler(0.95, "正在生成高分辨率长图...")
+        await progressHandler(0.95, "正在生成高分辨率长图...")
         let resultImage = UIImage(cgImage: currentCanvasCG, scale: images[0].scale, orientation: .up)
-        progressHandler(1.0, "拼接完成！")
+        await progressHandler(1.0, "拼接完成！")
         return resultImage
     }
     
@@ -84,13 +84,13 @@ public actor ImageStitchingEngine {
         keyFrames: [KeyFrame],
         fixedRegions: FixedUIDetector.FixedRegions,
         blendWidth: Int = 40,
-        progressHandler: @Sendable (Double, String) -> Void
+        progressHandler: @Sendable @MainActor (Double, String) -> Void
     ) async throws -> UIImage {
         guard keyFrames.count >= 2 else {
             throw RecordingError.insufficientKeyFrames
         }
         
-        progressHandler(0.86, "正在裁剪固定状态栏与导航栏...")
+        await progressHandler(0.86, "正在裁剪固定状态栏与导航栏...")
         
         let width = keyFrames[0].image.width
         let height = keyFrames[0].image.height
@@ -128,7 +128,7 @@ public actor ImageStitchingEngine {
             totalCanvasHeight = nextOffset + effectiveContentHeight
         }
         
-        progressHandler(0.90, "正在合成长截图画布（\(width)×\(totalCanvasHeight)px）...")
+        await progressHandler(0.90, "正在合成长截图画布（\(width)×\(totalCanvasHeight)px）...")
         
         // 3. Render into canvas
         let canvasSize = CGSize(width: cgWidth, height: CGFloat(totalCanvasHeight))
@@ -180,7 +180,7 @@ public actor ImageStitchingEngine {
         }
         
         // 4. Attach original top status bar and bottom bar if present
-        progressHandler(0.96, "正在拼接顶部状态栏与底部安全区...")
+        await progressHandler(0.96, "正在拼接顶部状态栏与底部安全区...")
         let finalImage: UIImage
         if topCrop > 0 || bottomCrop > 0, let firstFull = keyFrames.first?.image, let lastFull = keyFrames.last?.image {
             finalImage = addFixedUI(
@@ -193,7 +193,7 @@ public actor ImageStitchingEngine {
             finalImage = stitchedBody
         }
         
-        progressHandler(1.0, "长截图生成完毕！")
+        await progressHandler(1.0, "长截图生成完毕！")
         return finalImage
     }
     

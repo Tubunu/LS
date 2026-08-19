@@ -35,7 +35,7 @@ public actor KeyFrameSelector {
     public func selectKeyFrames(
         from displacements: [FrameDisplacement],
         config: Config = Config(),
-        progressHandler: @Sendable (Double, String) -> Void
+        progressHandler: @Sendable @MainActor (Double, String) -> Void
     ) async -> [KeyFrame] {
         guard !displacements.isEmpty else { return [] }
         
@@ -93,7 +93,7 @@ public actor KeyFrameSelector {
                 sinceLastCapture = 0
                 
                 let progress = 0.70 + (Double(index) / Double(total)) * 0.15
-                progressHandler(progress, "已筛选 \(keyFrames.count) 个关键帧...")
+                await progressHandler(progress, "已筛选 \(keyFrames.count) 个关键帧...")
             }
         }
         
@@ -110,7 +110,7 @@ public actor KeyFrameSelector {
             }
         }
         
-        progressHandler(0.85, "关键帧筛选完成，共 \(keyFrames.count) 个关键帧")
+        await progressHandler(0.85, "关键帧筛选完成，共 \(keyFrames.count) 个关键帧")
         return keyFrames
     }
 }

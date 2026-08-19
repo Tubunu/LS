@@ -19,7 +19,7 @@ public actor VideoFrameExtractor {
     public func extractFrames(
         from url: URL,
         samplingFPS: Double = 5.0,
-        progressHandler: @Sendable (Double, String) -> Void
+        progressHandler: @Sendable @MainActor (Double, String) -> Void
     ) async throws -> [FrameData] {
         let asset = AVURLAsset(url: url)
         
@@ -35,7 +35,7 @@ public actor VideoFrameExtractor {
             throw RecordingError.insufficientFrames
         }
         
-        progressHandler(0.05, "正在分析视频（\(String(format: "%.1f", totalSeconds))秒）...")
+        await progressHandler(0.05, "正在分析视频（\(String(format: "%.1f", totalSeconds))秒）...")
         
         // 2. Setup AVAssetReader
         let reader: AVAssetReader
@@ -88,7 +88,7 @@ public actor VideoFrameExtractor {
             frameIndex += 1
             
             let frameProgress = min(0.40, 0.05 + (currentTime / totalSeconds) * 0.35)
-            progressHandler(frameProgress, "正在提取视频帧（已提取 \(frameIndex) 帧）...")
+            await progressHandler(frameProgress, "正在提取视频帧（已提取 \(frameIndex) 帧）...")
         }
         
         if reader.status == .failed {
@@ -99,7 +99,7 @@ public actor VideoFrameExtractor {
             throw RecordingError.insufficientFrames
         }
         
-        progressHandler(0.40, "视频帧提取完成，共 \(frames.count) 帧")
+        await progressHandler(0.40, "视频帧提取完成，共 \(frames.count) 帧")
         return frames
     }
 }

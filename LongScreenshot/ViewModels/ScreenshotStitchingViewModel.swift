@@ -34,10 +34,9 @@ public final class ScreenshotStitchingViewModel: ObservableObject {
                 config: config,
                 blendWidth: blendWidth
             ) { [weak self] currentProgress, message in
-                Task { @MainActor in
-                    self?.progress = currentProgress
-                    self?.statusMessage = message
-                }
+                guard let self else { return }
+                self.progress = currentProgress
+                self.statusMessage = message
             }
             
             self.resultImage = result

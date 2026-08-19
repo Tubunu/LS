@@ -43,6 +43,10 @@ public enum PixelBuffer {
         
         context.interpolationQuality = .none
         context.setAllowsAntialiasing(false)
+        
+        // Flip CGContext vertically so memory row 0 corresponds to image top row (top-to-bottom)
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1.0, y: -1.0)
         context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         // Convert UInt8 buffer to Float buffer using vDSP with stride safety

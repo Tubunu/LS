@@ -292,7 +292,9 @@ public actor ImageStitchingEngine {
             for slice in slices {
                 autoreleasepool {
                     if let cropped = slice.frame.safeCropping(to: slice.srcRect) {
-                        UIImage(cgImage: cropped).draw(in: CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height))
+                        // Add 1.0px vertical overlap bleed to eliminate subpixel white line gaps between slices
+                        let renderRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height + 1.0)
+                        UIImage(cgImage: cropped).draw(in: renderRect)
                     }
                 }
             }

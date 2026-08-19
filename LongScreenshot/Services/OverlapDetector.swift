@@ -5,9 +5,9 @@ import Accelerate
 /// Service responsible for detecting pixel-accurate overlapping regions between consecutive screenshots
 public actor OverlapDetector {
     
-    private static let maxSADConfidenceScale: Float = 50.0
+    private static let maxSADConfidenceScale: Float = 60.0
     private static let minAmbiguitySADThreshold: Float = 2.0
-    private static let minConfidenceThreshold: Float = 0.65
+    private static let minConfidenceThreshold: Float = 0.50
     
     public init() {}
     
@@ -16,8 +16,8 @@ public actor OverlapDetector {
     ///   - image1: The upper image (CGImage)
     ///   - image2: The lower image (CGImage)
     ///   - referenceStripHeight: Height of the sample strip taken from the bottom of image1 (default: 200px)
-    ///   - searchRange: Maximum height to search in image2 (0 = 85% of image2 height)
-    /// - Returns: OverlapResult if a match with confidence >= 0.65 is found, nil otherwise
+    ///   - searchRange: Maximum height to search in image2 (0 = full height of image2)
+    /// - Returns: OverlapResult if a match with confidence >= 0.50 is found, nil otherwise
     public func findOverlap(
         bottomOf image1: CGImage,
         topOf image2: CGImage,
@@ -37,7 +37,7 @@ public actor OverlapDetector {
         let stripHeight = min(referenceStripHeight, min(height1 / 3, height2 / 3))
         guard stripHeight >= 20 else { return nil }
         
-        let actualSearchRange = searchRange > 0 ? min(searchRange, height2) : Int(Double(height2) * 0.85)
+        let actualSearchRange = searchRange > 0 ? min(searchRange, height2) : height2
         let maxOffset = actualSearchRange - stripHeight
         guard maxOffset > 0 else { return nil }
         

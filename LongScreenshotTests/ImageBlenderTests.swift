@@ -45,4 +45,57 @@ final class ImageBlenderTests: XCTestCase {
             XCTAssertEqual(blended.height, h1 + h2 - overlap)
         }
     }
+    
+    func testVariousBlendTransitionWidths() async {
+        let blender = ImageBlender()
+        let width = 200
+        let h1 = 300
+        let h2 = 300
+        let overlap = 80
+        
+        let img1 = createColorImage(width: width, height: h1, red: 1.0, green: 0.5, blue: 0.0)
+        let img2 = createColorImage(width: width, height: h2, red: 0.0, green: 0.5, blue: 1.0)
+        
+        // Test non-20 divisible widths (e.g. 15, 25, 35, 45, 55, 75)
+        for blendWidth in [15, 25, 35, 45, 55, 75] {
+            let blended = await blender.blendTwoImages(
+                image1: img1,
+                image2: img2,
+                overlapOffset: 0,
+                overlapHeight: overlap,
+                blendTransitionWidth: blendWidth
+            )
+            XCTAssertNotNil(blended, "Blend should succeed for blendWidth \(blendWidth)")
+            XCTAssertEqual(blended?.width, width)
+            XCTAssertEqual(blended?.height, h1 + h2 - overlap)
+        }
+    }
+    
+    func testBlenderWithNonZeroOverlapOffset() async {
+        let blender = ImageBlender()
+        let width = 200
+        let h1 = 300
+        let h2 = 400
+        let overlapOffset = 30
+        let overlapHeight = 70
+        
+        let img1 = createColorImage(width: width, height: h1, red: 1.0, green: 0.2, blue: 0.2)
+        let img2 = createColorImage(width: width, height: h2, red: 0.2, green: 0.8, blue: 0.2)
+        
+        let blended = await blender.blendTwoImages(
+            image1: img1,
+            image2: img2,
+            overlapOffset: overlapOffset,
+            overlapHeight: overlapHeight,
+            blendTransitionWidth: 25
+        )
+        
+        XCTAssertNotNil(blended)
+        if let blended {
+            XCTAssertEqual(blended.width, width)
+            let nonOverlapTopHeight = max(0, h1 - overlapHeight)
+            let expectedHeight = max(h1, nonOverlapTopHeight - overlapOffset + h2)
+            XCTAssertEqual(blended.height, expectedHeight)
+        }
+    }
 }

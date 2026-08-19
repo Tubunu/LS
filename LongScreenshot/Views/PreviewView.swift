@@ -3,10 +3,21 @@ import SwiftUI
 /// View for inspecting, zooming, saving, and sharing the generated long screenshot
 public struct PreviewView: View {
     @StateObject private var viewModel: PreviewViewModel
+    @AppStorage(AppSettings.outputQualityKey) private var outputQuality: Double = AppSettings.defaultOutputQuality
     @Environment(\.dismiss) private var dismiss
     
-    public init(resultImage: UIImage) {
+    public var onDismissToRoot: (() -> Void)?
+    
+    @State private var baseScale: CGFloat = 1.0
+    @State private var pinchScale: CGFloat = 1.0
+    
+    public init(resultImage: UIImage, onDismissToRoot: (() -> Void)? = nil) {
         _viewModel = StateObject(wrappedValue: PreviewViewModel(resultImage: resultImage))
+        self.onDismissToRoot = onDismissToRoot
+    }
+    
+    private var currentZoomScale: CGFloat {
+        max(1.0, min(baseScale * pinchScale, 5.0))
     }
     
     public var body: some View {
@@ -19,17 +30,18 @@ public struct PreviewView: View {
                 Image(uiImage: viewModel.resultImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .scaleEffect(viewModel.zoomScale)
+                    .scaleEffect(currentZoomScale)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .shadow(color: Color.black.opacity(0.35), radius: 24, x: 0, y: 12)
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
-                                viewModel.zoomScale = value
+                                pinchScale = value
                             }
                             .onEnded { value in
-                                withAnimation(.spring()) {
-                                    viewModel.zoomScale = max(1.0, min(value, 5.0))
+                                withAnimation(.spring(duration: 0.25)) {
+                                    baseScale = max(1.0, min(baseScale * value, 5.0))
+                                    pinchScale = 1.0
                                 }
                             }
                     )
@@ -42,8 +54,8 @@ public struct PreviewView: View {
                 HStack {
                     Spacer()
                     
-                    let width = Int(viewModel.resultImage.size.width)
-                    let height = Int(viewModel.resultImage.size.height)
+                    let width = viewModel.resultImage.cgImage?.width ?? Int(viewModel.resultImage.size.width * viewModel.resultImage.scale)
+                    let height = viewModel.resultImage.cgImage?.height ?? Int(viewModel.resultImage.size.height * viewModel.resultImage.scale)
                     
                     HStack(spacing: 6) {
                         Image(systemName: "aspectratio")
@@ -69,6 +81,9 @@ public struct PreviewView: View {
                 HStack(spacing: 14) {
                     // Back to Home
                     Button {
+                        if let onDismissToRoot {
+                            onDismissToRoot()
+                        }
                         dismiss()
                     } label: {
                         Image(systemName: "chevron.left")
@@ -80,7 +95,7 @@ public struct PreviewView: View {
                     
                     // Save to Album
                     Button {
-                        viewModel.saveToPhotos()
+                        viewModel.saveToPhotos(quality: outputQuality)
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: viewModel.isSaved ? "checkmark" : (viewModel.isSaving ? "hourglass" : "square.and.arrow.down.fill"))
@@ -111,7 +126,7 @@ public struct PreviewView: View {
                     
                     // Share Sheet
                     Button {
-                        viewModel.prepareSharing()
+                        viewModel.prepareSharing(quality: outputQuality)
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 17, weight: .bold))
@@ -130,6 +145,18 @@ public struct PreviewView: View {
                 ShareSheet(items: [shareURL])
             } else {
                 ShareSheet(items: [viewModel.resultImage])
+            }
+        }
+        .alert("提示", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("确定", role: .cancel) {
+                viewModel.errorMessage = nil
+            }
+        } message: {
+            if let msg = viewModel.errorMessage {
+                Text(msg)
             }
         }
     }

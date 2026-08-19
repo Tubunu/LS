@@ -21,7 +21,7 @@ public actor ImageExporter {
     /// Writes the image to a temporary file for external activity sharing
     nonisolated public func exportTemporaryFile(image: UIImage, format: OutputFormat = .png) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory
-        let fileName = "LongScreenshot_\(Int(Date().timeIntervalSince1970)).\(format.fileExtension)"
+        let fileName = "LongScreenshot_\(Int(Date().timeIntervalSince1970))_\(UUID().uuidString.prefix(8)).\(format.fileExtension)"
         let fileURL = tempDir.appendingPathComponent(fileName)
         
         let data: Data?
@@ -38,6 +38,26 @@ public actor ImageExporter {
         
         try validData.write(to: fileURL)
         return fileURL
+    }
+    
+    /// Cleans up old temporary long screenshot exports and video files in the tmp directory
+    nonisolated public static func cleanupTemporaryFiles() {
+        DispatchQueue.global(qos: .utility).async {
+            let tempDir = FileManager.default.temporaryDirectory
+            guard let files = try? FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+            
+            let now = Date()
+            for file in files {
+                let name = file.lastPathComponent
+                if name.hasPrefix("LongScreenshot_") || name.hasSuffix(".mp4") || name.hasSuffix(".mov") {
+                    if let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+                       let modDate = attrs[.modificationDate] as? Date,
+                       now.timeIntervalSince(modDate) > 3600 {
+                        try? FileManager.default.removeItem(at: file)
+                    }
+                }
+            }
+        }
     }
     
     public enum OutputFormat: Sendable {

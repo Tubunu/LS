@@ -12,7 +12,7 @@ public actor ImageStitchingEngine {
     
     // MARK: - Mode A: Screenshot Stitching
     
-    /// Stitches an array of overlapping screenshots into a seamless long screenshot
+    /// Stitches an array of overlapping screenshots into a seamless long screenshot in a single high-efficiency render pass
     public func stitchScreenshots(
         _ images: [UIImage],
         config: CropConfig = .standard,
@@ -26,60 +26,137 @@ public actor ImageStitchingEngine {
         let totalCount = images.count
         await progressHandler(0.05, "正在预处理截图（共 \(totalCount) 张）...")
         
+        if Task.isCancelled { throw RecordingError.processingCancelled }
+        
         // 1. Preprocess screenshots to remove repeated status bar / home bars
         let preprocessed = imagePreprocessor.preprocessBatch(images, config: config)
+        let cgImages = preprocessed.compactMap { $0.cgImage }
         
-        guard let firstCG = preprocessed[0].cgImage else {
-            throw RecordingError.stitchingFailed("无法解析首张截图的图像数据")
+        guard cgImages.count == totalCount else {
+            throw RecordingError.stitchingFailed("无法解析截图的图像数据")
         }
         
-        var currentCanvasCG: CGImage = firstCG
+        let width = cgImages[0].width
+        guard width > 0 else {
+            throw RecordingError.stitchingFailed("截图宽度异常")
+        }
         
-        // 2. Sequentially find overlap and blend
-        for i in 1..<totalCount {
-            guard let nextCG = preprocessed[i].cgImage else { continue }
+        // 2. Sequentially find overlap between adjacent pairs
+        var overlaps: [Int] = []
+        for i in 0..<(totalCount - 1) {
+            if Task.isCancelled { throw RecordingError.processingCancelled }
             
-            let pairProgress = 0.10 + (Double(i) / Double(totalCount)) * 0.75
+            let pairProgress = 0.10 + (Double(i) / Double(totalCount - 1)) * 0.70
             await progressHandler(pairProgress, "正在匹配拼接第 \(i + 1)/\(totalCount) 张截图...")
             
-            guard let overlap = await overlapDetector.findOverlap(bottomOf: currentCanvasCG, topOf: nextCG) else {
-                // If overlap confidence is too low, fall back to direct stacking or error
+            let img1 = cgImages[i]
+            let img2 = cgImages[i + 1]
+            
+            if let overlap = await overlapDetector.findOverlap(bottomOf: img1, topOf: img2) {
+                let validOverlap = min(overlap.overlapHeight, min(img1.height, img2.height))
+                overlaps.append(validOverlap)
+            } else {
                 AppLogger.stitching.warning("Failed to find strong overlap between image \(i) and \(i + 1). Falling back to direct concatenation.")
-                guard let fallbackBlend = await imageBlender.blendTwoImages(
-                    image1: currentCanvasCG,
-                    image2: nextCG,
-                    overlapOffset: 0,
-                    overlapHeight: 0,
-                    blendTransitionWidth: 0
-                ) else {
-                    throw RecordingError.stitchingFailed("拼接第 \(i + 1) 张截图失败，重叠度不足")
-                }
-                currentCanvasCG = fallbackBlend
-                continue
+                overlaps.append(0)
             }
-            
-            guard let blendedCG = await imageBlender.blendTwoImages(
-                image1: currentCanvasCG,
-                image2: nextCG,
-                overlapOffset: overlap.offset,
-                overlapHeight: overlap.overlapHeight,
-                blendTransitionWidth: blendWidth
-            ) else {
-                throw RecordingError.stitchingFailed("图像融合渲染失败")
-            }
-            
-            currentCanvasCG = blendedCG
         }
         
-        await progressHandler(0.95, "正在生成高分辨率长图...")
-        let resultImage = UIImage(cgImage: currentCanvasCG, scale: images[0].scale, orientation: .up)
+        if Task.isCancelled { throw RecordingError.processingCancelled }
+        
+        // 3. Compute canvas offsets for all images
+        var offsets: [Int] = [0]
+        for i in 1..<totalCount {
+            let prevHeight = cgImages[i - 1].height
+            let overlap = overlaps[i - 1]
+            let nextOffset = offsets[i - 1] + (prevHeight - overlap)
+            offsets.append(nextOffset)
+        }
+        
+        let totalCanvasHeight = (offsets.last ?? 0) + (cgImages.last?.height ?? 0)
+        guard totalCanvasHeight > 0 else {
+            throw RecordingError.stitchingFailed("生成的画布高度异常")
+        }
+        guard totalCanvasHeight <= 32768 else {
+            throw RecordingError.stitchingFailed("长截图高度超出系统单图上限（\(totalCanvasHeight)px > 32768px），请适当缩短拼接范围")
+        }
+        
+        await progressHandler(0.85, "正在合成高分辨率长图画布（\(width)×\(totalCanvasHeight)px）...")
+        
+        // 4. Single-pass high-efficiency rendering
+        let cgWidth = CGFloat(width)
+        let canvasSize = CGSize(width: cgWidth, height: CGFloat(totalCanvasHeight))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        format.opaque = true
+        
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
+        let stitchedImage = renderer.image { context in
+            let ctx = context.cgContext
+            
+            for i in 0..<totalCount {
+                autoreleasepool {
+                    let frame = cgImages[i]
+                    let yOffset = CGFloat(offsets[i])
+                    let frameHeight = CGFloat(frame.height)
+                    
+                    if i == 0 {
+                        UIImage(cgImage: frame).draw(in: CGRect(x: 0, y: yOffset, width: cgWidth, height: frameHeight))
+                    } else {
+                        let overlap = overlaps[i - 1]
+                        let transitionHeight = max(0, min(overlap, blendWidth))
+                        
+                        // Blend transition band if overlapping
+                        self.drawBlendedSlice(
+                            ctx: ctx,
+                            frame: frame,
+                            blendStartY: yOffset,
+                            transitionHeight: transitionHeight,
+                            cgWidth: cgWidth
+                        )
+                        
+                        // Draw non-overlapping body of frame
+                        let newContentY = CGFloat(transitionHeight)
+                        let newContentHeight = frameHeight - newContentY
+                        if newContentHeight > 0 {
+                            let contentRect = CGRect(x: 0, y: newContentY, width: cgWidth, height: newContentHeight).integral
+                            if let newPart = frame.safeCropping(to: contentRect) {
+                                UIImage(cgImage: newPart).draw(in: CGRect(x: 0, y: yOffset + newContentY, width: cgWidth, height: newContentHeight))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if Task.isCancelled { throw RecordingError.processingCancelled }
+        
+        await progressHandler(0.95, "正在导出高清长图...")
+        let originalScale = images.first?.scale ?? 1.0
+        let effectiveScale: CGFloat
+        if originalScale > 1.0 {
+            effectiveScale = originalScale
+        } else if width >= 1000 {
+            effectiveScale = 3.0
+        } else if width >= 640 {
+            effectiveScale = 2.0
+        } else {
+            effectiveScale = 1.0
+        }
+        
+        let finalImage: UIImage
+        if let cgResult = stitchedImage.cgImage {
+            finalImage = UIImage(cgImage: cgResult, scale: effectiveScale, orientation: .up)
+        } else {
+            finalImage = stitchedImage
+        }
+        
         await progressHandler(1.0, "拼接完成！")
-        return resultImage
+        return finalImage
     }
     
     // MARK: - Mode B: Screen Recording Stitching
     
-    /// Stitches keyframes extracted from video using known translation offsets
+    /// Stitches keyframes extracted from video using known translation offsets in a single high-efficiency render pass
     public func stitchFromRecording(
         keyFrames: [KeyFrame],
         fixedRegions: FixedUIDetector.FixedRegions,
@@ -89,6 +166,8 @@ public actor ImageStitchingEngine {
         guard keyFrames.count >= 2 else {
             throw RecordingError.insufficientKeyFrames
         }
+        
+        if Task.isCancelled { throw RecordingError.processingCancelled }
         
         await progressHandler(0.86, "正在裁剪固定状态栏与导航栏...")
         
@@ -117,129 +196,147 @@ public actor ImageStitchingEngine {
         
         // 2. Calculate offsets on final canvas
         var offsets: [Int] = [0]
-        var totalCanvasHeight = effectiveContentHeight
-        
         for i in 1..<keyFrames.count {
             let frameDelta = keyFrames[i].cumulativeOffset - keyFrames[i - 1].cumulativeOffset
             let adjustedDelta = Int(frameDelta)
-            let step = max(1, adjustedDelta)
+            if adjustedDelta <= 0 {
+                AppLogger.stitching.warning("Non-positive frame delta between keyframes \(i-1) and \(i): \(adjustedDelta)px")
+            }
+            let step = max(0, min(adjustedDelta, effectiveContentHeight))
             let nextOffset = offsets[i - 1] + step
             offsets.append(nextOffset)
-            totalCanvasHeight = nextOffset + effectiveContentHeight
         }
+        
+        let bodyTotalHeight = (offsets.last ?? 0) + effectiveContentHeight
+        let totalCanvasHeight = topCrop + bodyTotalHeight + bottomCrop
+        guard totalCanvasHeight <= 32768 else {
+            throw RecordingError.stitchingFailed("长截图高度超出系统单图上限（\(totalCanvasHeight)px > 32768px），请适当缩短录屏长度")
+        }
+        
+        if Task.isCancelled { throw RecordingError.processingCancelled }
         
         await progressHandler(0.90, "正在合成长截图画布（\(width)×\(totalCanvasHeight)px）...")
         
-        // 3. Render into canvas
+        // 3. Render directly in a single pass (Top Fixed UI + Keyframe Body + Bottom Fixed UI)
         let canvasSize = CGSize(width: cgWidth, height: CGFloat(totalCanvasHeight))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1.0
         format.opaque = true
         
         let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
-        let stitchedBody = renderer.image { context in
+        let stitchedImage = renderer.image { context in
             let ctx = context.cgContext
             
+            // 3.1 Draw Status Bar if present
+            if topCrop > 0, let firstFull = keyFrames.first?.image,
+               let topPart = firstFull.safeCropping(to: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop))) {
+                UIImage(cgImage: topPart).draw(in: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop)))
+            }
+            
+            // 3.2 Draw Stitched Keyframe Segments
+            let cgTopOffset = CGFloat(topCrop)
             for (index, frame) in croppedFrames.enumerated() {
-                let yOffset = CGFloat(offsets[index])
-                
-                if index == 0 {
-                    // First frame rendered completely
-                    ctx.draw(frame, in: CGRect(x: 0, y: yOffset, width: cgWidth, height: cgEffectiveHeight))
-                } else {
-                    let stepDelta = offsets[index] - offsets[index - 1]
-                    let overlap = max(0, effectiveContentHeight - stepDelta)
-                    let transitionHeight = min(overlap, blendWidth)
+                autoreleasepool {
+                    let yOffset = cgTopOffset + CGFloat(offsets[index])
                     
-                    // Blend transition band if overlapping
-                    if transitionHeight > 0 {
-                        let blendStartY = yOffset
-                        for row in 0..<transitionHeight {
-                            let alpha = CGFloat(row) / CGFloat(transitionHeight)
-                            let sliceRect = CGRect(x: 0, y: CGFloat(row), width: cgWidth, height: 1.0)
-                            if let rowImg = frame.safeCropping(to: sliceRect) {
-                                ctx.saveGState()
-                                ctx.setAlpha(alpha)
-                                ctx.draw(rowImg, in: CGRect(x: 0, y: blendStartY + CGFloat(row), width: cgWidth, height: 1.0))
-                                ctx.restoreGState()
+                    if index == 0 {
+                        // First frame rendered completely
+                        UIImage(cgImage: frame).draw(in: CGRect(x: 0, y: yOffset, width: cgWidth, height: cgEffectiveHeight))
+                    } else {
+                        let stepDelta = offsets[index] - offsets[index - 1]
+                        let overlap = max(0, effectiveContentHeight - stepDelta)
+                        let transitionHeight = min(overlap, blendWidth)
+                        
+                        // Blend transition band if overlapping
+                        self.drawBlendedSlice(
+                            ctx: ctx,
+                            frame: frame,
+                            blendStartY: yOffset,
+                            transitionHeight: transitionHeight,
+                            cgWidth: cgWidth
+                        )
+                        
+                        // Draw non-overlapping new content
+                        let newContentY = CGFloat(transitionHeight)
+                        let newContentHeight = cgEffectiveHeight - newContentY
+                        if newContentHeight > 0 {
+                            let contentRect = CGRect(x: 0, y: newContentY, width: cgWidth, height: newContentHeight).integral
+                            if let newPart = frame.safeCropping(to: contentRect) {
+                                UIImage(cgImage: newPart).draw(in: CGRect(x: 0, y: yOffset + newContentY, width: cgWidth, height: newContentHeight))
                             }
-                        }
-                    }
-                    
-                    // Draw non-overlapping new content
-                    let newContentY = transitionHeight
-                    let newContentHeight = effectiveContentHeight - newContentY
-                    if newContentHeight > 0 {
-                        let contentRect = CGRect(x: 0, y: CGFloat(newContentY), width: cgWidth, height: CGFloat(newContentHeight))
-                        if let newPart = frame.safeCropping(to: contentRect) {
-                            ctx.draw(newPart, in: CGRect(x: 0, y: yOffset + CGFloat(newContentY), width: cgWidth, height: CGFloat(newContentHeight)))
                         }
                     }
                 }
             }
+            
+            // 3.3 Draw Bottom Bar if present
+            if bottomCrop > 0, let lastFull = keyFrames.last?.image {
+                let bottomY = lastFull.height - bottomCrop
+                let bottomRect = CGRect(x: 0, y: CGFloat(bottomY), width: cgWidth, height: CGFloat(bottomCrop)).integral
+                if let bottomPart = lastFull.safeCropping(to: bottomRect) {
+                    let destY = CGFloat(totalCanvasHeight - bottomCrop)
+                    UIImage(cgImage: bottomPart).draw(in: CGRect(x: 0, y: destY, width: cgWidth, height: CGFloat(bottomCrop)))
+                }
+            }
+        }
+                let bottomRect = CGRect(x: 0, y: CGFloat(bottomY), width: cgWidth, height: CGFloat(bottomCrop)).integral
+                if let bottomPart = lastFull.safeCropping(to: bottomRect) {
+                    let destY = CGFloat(totalCanvasHeight - bottomCrop)
+                    UIImage(cgImage: bottomPart).draw(in: CGRect(x: 0, y: destY, width: cgWidth, height: CGFloat(bottomCrop)))
+                }
+            }
         }
         
-        // 4. Attach original top status bar and bottom bar if present
-        await progressHandler(0.96, "正在拼接顶部状态栏与底部安全区...")
-        let finalImage: UIImage
-        if topCrop > 0 || bottomCrop > 0, let firstFull = keyFrames.first?.image, let lastFull = keyFrames.last?.image {
-            finalImage = addFixedUI(
-                to: stitchedBody,
-                statusBar: firstFull,
-                bottomBar: lastFull,
-                fixedRegions: fixedRegions
-            )
+        await progressHandler(0.98, "长截图生成完毕！")
+        let targetScale: CGFloat
+        if width >= 1000 {
+            targetScale = 3.0
+        } else if width >= 640 {
+            targetScale = 2.0
         } else {
-            finalImage = stitchedBody
+            targetScale = 1.0
+        }
+        
+        let finalImage: UIImage
+        if let cgResult = stitchedImage.cgImage {
+            finalImage = UIImage(cgImage: cgResult, scale: targetScale, orientation: .up)
+        } else {
+            finalImage = stitchedImage
         }
         
         await progressHandler(1.0, "长截图生成完毕！")
         return finalImage
     }
     
-    private func addFixedUI(
-        to mainImage: UIImage,
-        statusBar sourceTop: CGImage,
-        bottomBar sourceBottom: CGImage,
-        fixedRegions: FixedUIDetector.FixedRegions
-    ) -> UIImage {
-        let width = Int(mainImage.size.width)
-        let mainHeight = Int(mainImage.size.height)
-        let totalHeight = fixedRegions.topHeight + mainHeight + fixedRegions.bottomHeight
-        let cgWidth = CGFloat(width)
-        let cgTopHeight = CGFloat(fixedRegions.topHeight)
-        let cgBottomHeight = CGFloat(fixedRegions.bottomHeight)
-        let cgMainHeight = CGFloat(mainHeight)
+    // MARK: - Helper Methods
+    
+    /// Renders an alpha-blended transition strip for overlapping adjacent images
+    private func drawBlendedSlice(
+        ctx: CGContext,
+        frame: CGImage,
+        blendStartY: CGFloat,
+        transitionHeight: Int,
+        cgWidth: CGFloat
+    ) {
+        guard transitionHeight > 0 else { return }
+        let steps = min(transitionHeight, 20)
         
-        let renderer = UIGraphicsImageRenderer(
-            size: CGSize(width: cgWidth, height: CGFloat(totalHeight)),
-            format: {
-                let f = UIGraphicsImageRendererFormat()
-                f.scale = 1.0
-                f.opaque = true
-                return f
-            }()
-        )
-        
-        return renderer.image { context in
-            let ctx = context.cgContext
-            
-            // 1. Status bar
-            if fixedRegions.topHeight > 0,
-               let top = sourceTop.safeCropping(to: CGRect(x: 0, y: 0, width: cgWidth, height: cgTopHeight)) {
-                ctx.draw(top, in: CGRect(x: 0, y: 0, width: cgWidth, height: cgTopHeight))
-            }
-            
-            // 2. Main stitched content
-            if let mainCG = mainImage.cgImage {
-                ctx.draw(mainCG, in: CGRect(x: 0, y: cgTopHeight, width: cgWidth, height: cgMainHeight))
-            }
-            
-            // 3. Bottom bar
-            if fixedRegions.bottomHeight > 0 {
-                let bottomY = sourceBottom.height - fixedRegions.bottomHeight
-                if let bottom = sourceBottom.safeCropping(to: CGRect(x: 0, y: CGFloat(bottomY), width: cgWidth, height: cgBottomHeight)) {
-                    ctx.draw(bottom, in: CGRect(x: 0, y: cgTopHeight + cgMainHeight, width: cgWidth, height: cgBottomHeight))
+        for step in 0..<steps {
+            autoreleasepool {
+                let startY = (CGFloat(step) * CGFloat(transitionHeight) / CGFloat(steps)).rounded()
+                let endY = (CGFloat(step + 1) * CGFloat(transitionHeight) / CGFloat(steps)).rounded()
+                let sliceHeight = endY - startY
+                guard sliceHeight > 0 else { return }
+                
+                let alpha = CGFloat(step + 1) / CGFloat(steps + 1)
+                let destY = blendStartY + startY
+                
+                let sliceRect = CGRect(x: 0, y: startY, width: cgWidth, height: sliceHeight).integral
+                if let slice = frame.safeCropping(to: sliceRect) {
+                    ctx.saveGState()
+                    ctx.setAlpha(alpha)
+                    UIImage(cgImage: slice).draw(in: CGRect(x: 0, y: destY, width: cgWidth, height: sliceHeight))
+                    ctx.restoreGState()
                 }
             }
         }

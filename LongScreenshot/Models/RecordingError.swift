@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors that can occur during video recording frame extraction, tracking, or stitching
-public enum RecordingError: LocalizedError, Sendable {
+public enum RecordingError: LocalizedError, Equatable, Sendable {
     case noVideoTrack
     case readerConfigFailed
     case readingFailed(String)
@@ -20,7 +20,7 @@ public enum RecordingError: LocalizedError, Sendable {
         case .readingFailed(let message):
             return "视频读取失败：\(message)"
         case .insufficientFrames:
-            return "视频中没有检测到足够的有效帧"
+            return "有效图像或视频帧不足，至少需要两张截图或包含平稳滚动的录屏"
         case .insufficientKeyFrames:
             return "未检测到足够的滚动内容。请确保录屏中包含平稳的页面滚动操作。"
         case .processingCancelled:

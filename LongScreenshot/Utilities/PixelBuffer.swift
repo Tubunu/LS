@@ -5,48 +5,63 @@ import Accelerate
 /// Utilities for high-performance pixel extraction and vector arithmetic using Accelerate (vDSP)
 public enum PixelBuffer {
     
-    /// Extracts a grayscale representation of a sub-rect from a CGImage as a normalized [Float] buffer (0...255).
+    /// Default pixel SAD tolerance for sensor noise
+    public static let defaultPixelSADTolerance: Float = 3.5
+    /// Standard maximum SAD range used for linear confidence scoring
+    public static let maxConfidenceSADRange: Float = 50.0
+    
+    /// Extracts a grayscale representation of a sub-rect from a CGImage as raw UInt8 intensity values in Float representation (0.0 ... 255.0).
     /// - Parameters:
     ///   - image: Source CGImage
     ///   - rect: Target rectangle within image coordinates
-    /// - Returns: Float array of grayscale intensity values
+    /// - Returns: Float array of grayscale intensity values (0.0 ... 255.0)
     public static func extractGrayscalePixels(from image: CGImage, rect: CGRect) -> [Float] {
-        let width = max(1, Int(rect.width))
-        let height = max(1, Int(rect.height))
-        let totalPixels = width * height
+        guard let cropped = image.safeCropping(to: rect) ?? image.cropping(to: rect) else {
+            return []
+        }
         
-        var rawPixels = [UInt8](repeating: 0, count: totalPixels)
-        let colorSpace = CGColorSpaceCreateDeviceGray()
+        let width = cropped.width
+        let height = cropped.height
+        let totalPixels = width * height
+        guard totalPixels > 0 else { return [] }
+        
+        guard let grayColorSpace = CGColorSpace(name: CGColorSpace.linearGray) ?? CGColorSpace(name: CGColorSpace.genericGrayGamma2_2) else {
+            return []
+        }
         
         guard let context = CGContext(
-            data: &rawPixels,
+            data: nil,
             width: width,
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: width,
-            space: colorSpace,
+            space: grayColorSpace,
             bitmapInfo: CGImageAlphaInfo.none.rawValue
-        ) else {
-            return [Float](repeating: 0, count: totalPixels)
+        ), let dataPtr = context.data else {
+            return []
         }
         
-        // Draw the cropped portion into our grayscale buffer
         context.interpolationQuality = .none
         context.setAllowsAntialiasing(false)
+        context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
         
-        // Invert Y coordinate since CoreGraphics has origin at bottom-left
-        let drawRect = CGRect(
-            x: -rect.origin.x,
-            y: rect.origin.y + CGFloat(height) - CGFloat(image.height),
-            width: CGFloat(image.width),
-            height: CGFloat(image.height)
-        )
-        
-        context.draw(image, in: drawRect)
-        
-        // Convert UInt8 buffer to Float buffer using vDSP
+        // Convert UInt8 buffer to Float buffer using vDSP with stride safety
         var floatPixels = [Float](repeating: 0, count: totalPixels)
-        vDSP_vfltu8(rawPixels, 1, &floatPixels, 1, vDSP_Length(totalPixels))
+        let actualBytesPerRow = context.bytesPerRow
+        let uint8Ptr = dataPtr.bindMemory(to: UInt8.self, capacity: actualBytesPerRow * height)
+        
+        if actualBytesPerRow == width {
+            vDSP_vfltu8(uint8Ptr, 1, &floatPixels, 1, vDSP_Length(totalPixels))
+        } else {
+            floatPixels.withUnsafeMutableBufferPointer { floatBuf in
+                guard let floatBase = floatBuf.baseAddress else { return }
+                for row in 0..<height {
+                    let srcRow = uint8Ptr.advanced(by: row * actualBytesPerRow)
+                    let dstRow = floatBase.advanced(by: row * width)
+                    vDSP_vfltu8(srcRow, 1, dstRow, 1, vDSP_Length(width))
+                }
+            }
+        }
         
         return floatPixels
     }
@@ -60,15 +75,35 @@ public enum PixelBuffer {
         let count = min(bufferA.count, bufferB.count)
         guard count > 0 else { return Float.infinity }
         
-        var diff = [Float](repeating: 0, count: count)
-        var sad: Float = 0
+        return bufferA.withUnsafeBufferPointer { ptrA in
+            bufferB.withUnsafeBufferPointer { ptrB in
+                guard let baseA = ptrA.baseAddress, let baseB = ptrB.baseAddress else { return Float.infinity }
+                var diff = [Float](repeating: 0, count: count)
+                return diff.withUnsafeMutableBufferPointer { diffPtr in
+                    guard let baseDiff = diffPtr.baseAddress else { return Float.infinity }
+                    return computeSADDirect(ptrA: baseA, ptrB: baseB, count: count, diffBuffer: baseDiff)
+                }
+            }
+        }
+    }
+    
+    /// Computes the Sum of Absolute Differences (SAD) directly between two memory pointers using a pre-allocated difference buffer.
+    /// This eliminates repeated heap allocations during high-frequency matching loops.
+    public static func computeSADDirect(
+        ptrA: UnsafePointer<Float>,
+        ptrB: UnsafePointer<Float>,
+        count: Int,
+        diffBuffer: UnsafeMutablePointer<Float>
+    ) -> Float {
+        guard count > 0 else { return Float.infinity }
         
-        // diff = bufferA - bufferB
-        vDSP_vsub(bufferB, 1, bufferA, 1, &diff, 1, vDSP_Length(count))
+        // diff = ptrA - ptrB
+        vDSP_vsub(ptrB, 1, ptrA, 1, diffBuffer, 1, vDSP_Length(count))
         // diff = |diff|
-        vDSP_vabs(diff, 1, &diff, 1, vDSP_Length(count))
+        vDSP_vabs(diffBuffer, 1, diffBuffer, 1, vDSP_Length(count))
         // sad = sum(diff)
-        vDSP_sve(diff, 1, &sad, vDSP_Length(count))
+        var sad: Float = 0
+        vDSP_sve(diffBuffer, 1, &sad, vDSP_Length(count))
         
         return sad / Float(count)
     }

@@ -71,8 +71,8 @@ public struct ScreenshotPickerView: View {
                         
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
-                                ForEach(Array(viewModel.selectedImages.enumerated()), id: \.offset) { index, image in
-                                    ImageThumbnail(image: image, index: index) {
+                                ForEach(Array(viewModel.thumbnails.enumerated()), id: \.offset) { index, thumb in
+                                    ImageThumbnail(image: thumb, index: index) {
                                         withAnimation {
                                             viewModel.removeImage(at: index)
                                         }

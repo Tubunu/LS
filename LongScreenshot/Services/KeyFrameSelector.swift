@@ -42,6 +42,7 @@ public actor KeyFrameSelector {
         var keyFrames: [KeyFrame] = []
         var cumulativeOffset: CGFloat = 0
         var sinceLastCapture: CGFloat = 0
+        var dirAccumulator: CGFloat = 0
         var primaryScrollDirection: CGFloat = 0
         
         // The first frame is always the starting keyframe
@@ -55,6 +56,7 @@ public actor KeyFrameSelector {
         let total = displacements.count
         
         for (index, disp) in displacements.enumerated() {
+            if Task.isCancelled { return [] }
             guard index > 0 else { continue }
             
             let absDy = abs(disp.dy)
@@ -72,7 +74,13 @@ public actor KeyFrameSelector {
             // 3. Establish & verify scroll direction consistency (downward vs upward)
             let currentDirection: CGFloat = disp.dy > 0 ? 1 : -1
             if primaryScrollDirection == 0 {
-                primaryScrollDirection = currentDirection
+                dirAccumulator += disp.dy
+                if abs(dirAccumulator) >= 15.0 {
+                    primaryScrollDirection = dirAccumulator > 0 ? 1 : -1
+                } else {
+                    // Suppress initial minor jitter until meaningful movement is established
+                    continue
+                }
             } else if currentDirection != primaryScrollDirection {
                 // Ignore bouncing or reversed scroll jitter
                 continue
@@ -97,8 +105,9 @@ public actor KeyFrameSelector {
             }
         }
         
-        // 6. Guarantee the last scrolling frame is captured to prevent content truncation
-        if let lastScrollingDisp = displacements.last(where: { $0.isScrolling }) {
+        // 6. Guarantee the last scrolling frame is captured only if it adds meaningful new content
+        if let lastScrollingDisp = displacements.last(where: { $0.isScrolling }),
+           sinceLastCapture > 10.0 {
             let lastCapturedTimestamp = keyFrames.last?.timestamp
             if lastCapturedTimestamp != lastScrollingDisp.frame.timestamp {
                 keyFrames.append(KeyFrame(

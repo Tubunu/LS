@@ -53,6 +53,7 @@
 		A052 /* ScrollDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B052 /* ScrollDetectorTests.swift */; };
 		A053 /* KeyFrameSelectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B053 /* KeyFrameSelectorTests.swift */; };
 		A054 /* StitchingPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B054 /* StitchingPipelineTests.swift */; };
+		A055 /* FixedUIDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B055 /* FixedUIDetectorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -115,6 +116,7 @@
 		B052 /* ScrollDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollDetectorTests.swift; sourceTree = "<group>"; };
 		B053 /* KeyFrameSelectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyFrameSelectorTests.swift; sourceTree = "<group>"; };
 		B054 /* StitchingPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StitchingPipelineTests.swift; sourceTree = "<group>"; };
+		B055 /* FixedUIDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedUIDetectorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -273,6 +275,7 @@
 				B052 /* ScrollDetectorTests.swift */,
 				B053 /* KeyFrameSelectorTests.swift */,
 				B054 /* StitchingPipelineTests.swift */,
+				B055 /* FixedUIDetectorTests.swift */,
 			);
 			path = LongScreenshotTests;
 			sourceTree = "<group>";
@@ -429,6 +432,7 @@
 				A052 /* ScrollDetectorTests.swift in Sources */,
 				A053 /* KeyFrameSelectorTests.swift in Sources */,
 				A054 /* StitchingPipelineTests.swift in Sources */,
+				A055 /* FixedUIDetectorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

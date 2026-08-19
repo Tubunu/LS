@@ -1,0 +1,101 @@
+name: iOS CI & Build IPA
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, Test & Package IPA
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode Version
+        run: |
+          echo "Available Xcode installations:"
+          ls -d /Applications/Xcode* || true
+          if [ -d "/Applications/Xcode_15.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_15.4.app
+          elif [ -d "/Applications/Xcode_16.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.0.app
+          fi
+          xcodebuild -version
+
+      - name: Swift Package Manager Test
+        run: |
+          swift test
+
+      - name: Run Xcode Simulator Tests
+        run: |
+          xcodebuild test \
+            -project LongScreenshot.xcodeproj \
+            -scheme LongScreenshot \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      - name: Build & Archive (iOS Device - Release)
+        run: |
+          xcodebuild archive \
+            -project LongScreenshot.xcodeproj \
+            -scheme LongScreenshot \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/LongScreenshot.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -r build/LongScreenshot.xcarchive/Products/Applications/LongScreenshot.app build/Payload/
+          cd build
+          zip -r LongScreenshot-unsigned.ipa Payload
+          cd ..
+          ls -lh build/LongScreenshot-unsigned.ipa
+
+      - name: Build Simulator Binary (.app.zip)
+        run: |
+          xcodebuild build \
+            -project LongScreenshot.xcodeproj \
+            -scheme LongScreenshot \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO
+          
+          cd build/DerivedData/Build/Products/Release-iphonesimulator
+          zip -r ../../../../build/LongScreenshot-Simulator.app.zip LongScreenshot.app
+          cd ../../../../../
+          ls -lh build/LongScreenshot-Simulator.app.zip
+
+      - name: Upload Unsigned IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LongScreenshot-Unsigned-IPA
+          path: build/LongScreenshot-unsigned.ipa
+          retention-days: 14
+
+      - name: Upload Simulator App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LongScreenshot-Simulator-App
+          path: build/LongScreenshot-Simulator.app.zip
+          retention-days: 14

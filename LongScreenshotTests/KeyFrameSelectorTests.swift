@@ -50,4 +50,31 @@ final class KeyFrameSelectorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(keyFrames.count, 3)
         XCTAssertEqual(keyFrames.first?.cumulativeOffset, 0)
     }
+    
+    func testInitialJitterDoesNotBlockDownwardScroll() async {
+        let selector = KeyFrameSelector()
+        let dummyImage = createDummyCGImage()
+        
+        var displacements: [FrameDisplacement] = []
+        
+        // Frame 0 (initial)
+        let f0 = FrameData(image: dummyImage, timestamp: .zero, index: 0)
+        displacements.append(FrameDisplacement(frame: f0, dy: 0, dx: 0, isScrolling: false))
+        
+        // Frame 1: Tiny micro-jitter upward (-3.0px)
+        let f1 = FrameData(image: dummyImage, timestamp: CMTime(seconds: 0.1, preferredTimescale: 600), index: 1)
+        displacements.append(FrameDisplacement(frame: f1, dy: -3.0, dx: 0, isScrolling: true))
+        
+        // Frames 2..10: Normal continuous downward scroll (+50.0px per frame)
+        for i in 2...10 {
+            let f = FrameData(image: dummyImage, timestamp: CMTime(seconds: Double(i) * 0.1, preferredTimescale: 600), index: i)
+            displacements.append(FrameDisplacement(frame: f, dy: 50.0, dx: 0, isScrolling: true))
+        }
+        
+        let config = KeyFrameSelector.Config(captureThreshold: 150.0)
+        let keyFrames = await selector.selectKeyFrames(from: displacements, config: config) { _, _ in }
+        
+        // Should successfully extract keyframes despite initial upward jitter
+        XCTAssertGreaterThanOrEqual(keyFrames.count, 3, "Keyframes should be extracted despite initial micro-jitter")
+    }
 }

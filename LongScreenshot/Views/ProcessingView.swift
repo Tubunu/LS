@@ -47,6 +47,13 @@ public struct ProcessingView: View {
         }
     }
     
+    private var isCurrentlyProcessing: Bool {
+        switch mode {
+        case .screenshot: return screenshotVM.isProcessing
+        case .recording: return recordingVM.isProcessing
+        }
+    }
+    
     public var body: some View {
         ZStack {
             // Apple Music Ambient Background
@@ -78,6 +85,70 @@ public struct ProcessingView: View {
                         .padding(.vertical, 6)
                         .background(mode.themeColor.opacity(0.15))
                         .clipShape(Capsule())
+                    
+                    // Cancel action button when processing
+                    if isCurrentlyProcessing && currentErrorMessage == nil {
+                        Button {
+                            cancelCurrentProcessing()
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "xmark")
+                                Text("取消处理")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.secondary.opacity(0.12))
+                            .clipShape(Capsule())
+                        }
+                        .padding(.top, 6)
+                    }
+                    
+                    // Finished state buttons (if user dismisses preview back to processing)
+                    if !isCurrentlyProcessing && finalResultImage != nil {
+                        HStack(spacing: 14) {
+                            Button {
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "house.fill")
+                                    Text("返回主页")
+                                }
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 10)
+                            }
+                            .glassEffect(.regular.interactive, in: .capsule)
+                            
+                            Button {
+                                navigateToPreview = true
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.up.right.and.arrow.down.left.rectangle")
+                                    Text("查看长图")
+                                }
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.98, green: 0.14, blue: 0.24),
+                                            Color(red: 0.66, green: 0.13, blue: 0.84)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
                 }
                 .padding(.horizontal, 40)
                 
@@ -122,37 +193,47 @@ public struct ProcessingView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .task {
-            startProcessing()
+            await startProcessing()
         }
-        .onChange(of: finalResultImage) { newImage in
-            if newImage != nil {
-                navigateToPreview = true
-            }
+        .onChange(of: finalResultImage) { _, image in
+            guard image != nil, !navigateToPreview else { return }
+            navigateToPreview = true
+            ImageExporter.cleanupTemporaryFiles()
         }
         .navigationDestination(isPresented: $navigateToPreview) {
             if let image = finalResultImage {
-                PreviewView(resultImage: image)
+                PreviewView(resultImage: image, onDismissToRoot: {
+                    dismiss()
+                })
             }
         }
     }
     
-    private func startProcessing() {
-        Task {
-            switch mode {
-            case .screenshot(let images):
-                await screenshotVM.processScreenshots(
-                    images,
-                    config: autoDetectFixedUI ? .standard : .zero,
-                    blendWidth: Int(blendingWidth)
-                )
-            case .recording(let url):
-                await recordingVM.processRecording(
-                    url: url,
-                    samplingFPS: samplingFPS,
-                    keyFrameThreshold: CGFloat(keyFrameThreshold),
-                    autoDetectFixedUI: autoDetectFixedUI
-                )
-            }
+    private func cancelCurrentProcessing() {
+        switch mode {
+        case .screenshot:
+            screenshotVM.cancelProcessing()
+        case .recording:
+            recordingVM.cancelProcessing()
+        }
+    }
+    
+    private func startProcessing() async {
+        switch mode {
+        case .screenshot(let images):
+            await screenshotVM.processScreenshots(
+                images,
+                config: autoDetectFixedUI ? .standard : .zero,
+                blendWidth: Int(blendingWidth)
+            )
+        case .recording(let url):
+            await recordingVM.processRecording(
+                url: url,
+                samplingFPS: samplingFPS,
+                keyFrameThreshold: CGFloat(keyFrameThreshold),
+                autoDetectFixedUI: autoDetectFixedUI,
+                blendWidth: Int(blendingWidth)
+            )
         }
     }
 }

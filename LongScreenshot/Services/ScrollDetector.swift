@@ -30,16 +30,19 @@ public actor ScrollDetector {
             isScrolling: false
         ))
         
-        let sequenceHandler = VNSequenceRequestHandler()
         let count = frames.count
+        let sequenceHandler = VNSequenceRequestHandler()
         
         for i in 1..<count {
+            if Task.isCancelled {
+                throw RecordingError.processingCancelled
+            }
+            
             let previousImage = frames[i - 1].image
             let currentImage = frames[i].image
             
             let request = VNTranslationalImageRegistrationRequest(
-                targetedCGImage: currentImage,
-                options: [:]
+                targetedCGImage: currentImage
             )
             
             do {
@@ -54,7 +57,7 @@ public actor ScrollDetector {
             if let result = request.results?.first as? VNImageTranslationAlignmentObservation {
                 let transform = result.alignmentTransform
                 dx = transform.tx
-                dy = transform.ty
+                dy = -transform.ty
             }
             
             // Criteria for active vertical scroll:

@@ -3,7 +3,6 @@ import SwiftUI
 /// Main home screen allowing users to choose between Screenshot Stitching and Screen Recording modes
 public struct HomeView: View {
     @State private var selectedMode: HomeAppMode?
-    @AppStorage(AppSettings.appThemeKey) private var appThemeRaw: String = AppSettings.defaultTheme.rawValue
     
     public enum HomeAppMode: String, Identifiable, Hashable {
         case screenshot = "screenshot"
@@ -13,10 +12,6 @@ public struct HomeView: View {
     }
     
     public init() {}
-    
-    private var currentTheme: AppTheme {
-        AppTheme(rawValue: appThemeRaw) ?? .system
-    }
     
     public var body: some View {
         NavigationStack {
@@ -141,7 +136,6 @@ public struct HomeView: View {
                     RecordingPickerView()
                 }
             }
-            .preferredColorScheme(currentTheme.colorScheme)
         }
     }
     

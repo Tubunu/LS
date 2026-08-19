@@ -10,6 +10,7 @@ public struct RecordingPickerView: View {
     @State private var videoThumbnail: UIImage?
     @State private var navigateToProcessing = false
     @State private var isLoading = false
+    @State private var loadTask: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
     
     public init() {}
@@ -187,7 +188,7 @@ public struct RecordingPickerView: View {
         }
         .navigationTitle("录屏转长图")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: selectedVideoItem) { newItem in
+        .onChange(of: selectedVideoItem) { _, newItem in
             loadVideo(from: newItem)
         }
         .navigationDestination(isPresented: $navigateToProcessing) {
@@ -215,44 +216,74 @@ public struct RecordingPickerView: View {
     }
     
     private func loadVideo(from item: PhotosPickerItem?) {
+        loadTask?.cancel()
         guard let item else { return }
+        
+        let previousURL = videoURL
         isLoading = true
         
-        Task {
-            if let movie = try? await item.loadTransferable(type: Movie.self) {
-                let asset = AVURLAsset(url: movie.url)
-                let duration = try? await asset.load(.duration)
-                
-                let generator = AVAssetImageGenerator(asset: asset)
-                generator.appliesPreferredTrackTransform = true
-                generator.maximumSize = CGSize(width: 400, height: 0)
-                
-                let thumbnailToSet: UIImage?
-                if let cgImage = try? await generator.image(at: .zero).image {
-                    thumbnailToSet = UIImage(cgImage: cgImage)
-                } else {
-                    thumbnailToSet = nil
+        loadTask = Task {
+            do {
+                guard let movie = try await item.loadTransferable(type: Movie.self) else {
+                    await MainActor.run {
+                        if !Task.isCancelled {
+                            self.isLoading = false
+                        }
+                    }
+                    return
                 }
                 
-                let durationToSet: String
-                if let duration {
-                    let seconds = CMTimeGetSeconds(duration)
-                    durationToSet = String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60)
-                } else {
-                    durationToSet = ""
+                if Task.isCancelled {
+                    try? FileManager.default.removeItem(at: movie.url)
+                    return
                 }
+                
+                // Remove previous temporary file if it's different
+                if let oldURL = previousURL, oldURL != movie.url {
+                    try? FileManager.default.removeItem(at: oldURL)
+                }
+                
+                // Decode metadata & thumbnail off the main thread
+                let (thumbnail, durationString) = await Task.detached(priority: .userInitiated) { () -> (UIImage?, String) in
+                    let asset = AVURLAsset(url: movie.url)
+                    let duration = try? await asset.load(.duration)
+                    
+                    let generator = AVAssetImageGenerator(asset: asset)
+                    generator.appliesPreferredTrackTransform = true
+                    generator.maximumSize = CGSize(width: 400, height: 0)
+                    
+                    let thumbImage: UIImage?
+                    if let cgImage = try? await generator.image(at: .zero).image {
+                        thumbImage = UIImage(cgImage: cgImage)
+                    } else {
+                        thumbImage = nil
+                    }
+                    
+                    let durStr: String
+                    if let duration {
+                        let seconds = CMTimeGetSeconds(duration)
+                        durStr = String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60)
+                    } else {
+                        durStr = ""
+                    }
+                    return (thumbImage, durStr)
+                }.value
                 
                 let targetURL = movie.url
                 
                 await MainActor.run {
-                    self.videoThumbnail = thumbnailToSet
-                    self.videoURL = targetURL
-                    self.videoDuration = durationToSet
-                    self.isLoading = false
+                    if !Task.isCancelled {
+                        self.videoThumbnail = thumbnail
+                        self.videoURL = targetURL
+                        self.videoDuration = durationString
+                        self.isLoading = false
+                    }
                 }
-            } else {
+            } catch {
                 await MainActor.run {
-                    self.isLoading = false
+                    if !Task.isCancelled {
+                        self.isLoading = false
+                    }
                 }
             }
         }

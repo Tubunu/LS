@@ -17,6 +17,8 @@ jobs:
   build_and_package:
     name: Build & Export IPA
     runs-on: macos-14
+    permissions:
+      contents: write
     steps:
       - name: 检出代码 (Checkout Code)
         uses: actions/checkout@v4
@@ -37,7 +39,37 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO
+            COMPILER_INDEX_STORE_ENABLE=NO > build_output.txt 2>&1 || true
+          
+          if grep -q "\*\* BUILD FAILED \*\*" build_output.txt; then
+            echo "BUILD_HAS_FAILED=true" >> $GITHUB_ENV
+          else
+            echo "BUILD_HAS_FAILED=false" >> $GITHUB_ENV
+          fi
+
+      - name: 回传错误信息至 Commit 评论 (Post error to Commit Comment)
+        if: env.BUILD_HAS_FAILED == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('build_output.txt')) {
+              const log = fs.readFileSync('build_output.txt', 'utf8');
+              const lines = log.split('\n');
+              const errorLines = lines.filter(l => l.includes('error:') || l.includes('fatal error:'));
+              const tailLines = lines.slice(-80);
+              const body = "### 🛠️ Build Log Errors:\n```text\n" + (errorLines.length ? errorLines.join('\n') : "No direct error string matched") + "\n```\n\n### 📋 Last 80 lines:\n```text\n" + tailLines.join('\n') + "\n```";
+              await github.rest.repos.createCommitComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+                body: body
+              });
+            }
+
+      - name: 检查构建结果并中断 (Assert Build Success)
+        if: env.BUILD_HAS_FAILED == 'true'
+        run: exit 1
 
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |

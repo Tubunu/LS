@@ -220,10 +220,9 @@ public struct GlassEffectContainer<Content: View>: View {
     }
 }
 
-/// Apple Music animated aurora mesh background with dynamic light and dark theme adaptation
+/// Apple Music aurora mesh background with dynamic light and dark theme adaptation
 public struct MusicAmbientBackground: View {
     @Environment(\.colorScheme) private var colorScheme
-    @State private var animateOrb: Bool = false
     
     public init() {}
     
@@ -240,10 +239,10 @@ public struct MusicAmbientBackground: View {
                 .fill(
                     RadialGradient(
                         colors: isDark ? [
-                            Color(red: 0.98, green: 0.14, blue: 0.24).opacity(0.7),
+                            Color(red: 0.98, green: 0.14, blue: 0.24).opacity(0.45),
                             Color.clear
                         ] : [
-                            Color(red: 1.0, green: 0.45, blue: 0.58).opacity(0.4),
+                            Color(red: 1.0, green: 0.45, blue: 0.58).opacity(0.3),
                             Color.clear
                         ],
                         center: .center,
@@ -253,17 +252,17 @@ public struct MusicAmbientBackground: View {
                 )
                 .frame(width: 320, height: 320)
                 .blur(radius: 60)
-                .offset(x: animateOrb ? -80 : -120, y: animateOrb ? -180 : -220)
+                .offset(x: -100, y: -200)
             
             // Orb 2: Electric Violet / Purple
             Circle()
                 .fill(
                     RadialGradient(
                         colors: isDark ? [
-                            Color(red: 0.66, green: 0.13, blue: 0.84).opacity(0.75),
+                            Color(red: 0.66, green: 0.13, blue: 0.84).opacity(0.45),
                             Color.clear
                         ] : [
-                            Color(red: 0.82, green: 0.60, blue: 0.98).opacity(0.45),
+                            Color(red: 0.82, green: 0.60, blue: 0.98).opacity(0.3),
                             Color.clear
                         ],
                         center: .center,
@@ -273,17 +272,17 @@ public struct MusicAmbientBackground: View {
                 )
                 .frame(width: 360, height: 360)
                 .blur(radius: 70)
-                .offset(x: animateOrb ? 120 : 160, y: animateOrb ? 40 : 0)
+                .offset(x: 140, y: 20)
             
             // Orb 3: Deep Indigo / Vibrant Blue
             Circle()
                 .fill(
                     RadialGradient(
                         colors: isDark ? [
-                            Color(red: 0.35, green: 0.34, blue: 0.84).opacity(0.7),
+                            Color(red: 0.35, green: 0.34, blue: 0.84).opacity(0.4),
                             Color.clear
                         ] : [
-                            Color(red: 0.55, green: 0.75, blue: 1.0).opacity(0.4),
+                            Color(red: 0.55, green: 0.75, blue: 1.0).opacity(0.25),
                             Color.clear
                         ],
                         center: .center,
@@ -293,17 +292,17 @@ public struct MusicAmbientBackground: View {
                 )
                 .frame(width: 300, height: 300)
                 .blur(radius: 60)
-                .offset(x: animateOrb ? -100 : -60, y: animateOrb ? 240 : 200)
+                .offset(x: -80, y: 220)
             
             // Orb 4: Cyan / Mint Glow
             Circle()
                 .fill(
                     RadialGradient(
                         colors: isDark ? [
-                            Color(red: 0.0, green: 0.78, blue: 0.75).opacity(0.35),
+                            Color(red: 0.0, green: 0.78, blue: 0.75).opacity(0.25),
                             Color.clear
                         ] : [
-                            Color(red: 0.50, green: 0.92, blue: 0.80).opacity(0.3),
+                            Color(red: 0.50, green: 0.92, blue: 0.80).opacity(0.2),
                             Color.clear
                         ],
                         center: .center,
@@ -313,12 +312,7 @@ public struct MusicAmbientBackground: View {
                 )
                 .frame(width: 260, height: 260)
                 .blur(radius: 50)
-                .offset(x: animateOrb ? 100 : 80, y: animateOrb ? 320 : 360)
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 8.0).repeatForever(autoreverses: true)) {
-                animateOrb = true
-            }
+                .offset(x: 90, y: 340)
         }
     }
 }

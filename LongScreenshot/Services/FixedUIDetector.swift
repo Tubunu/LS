@@ -16,7 +16,7 @@ public actor FixedUIDetector {
         public static let zero = FixedRegions(topHeight: 0, bottomHeight: 0)
     }
     
-    private static let rowIdenticalSADThreshold: Float = 3.5
+    private static let rowIdenticalSADThreshold: Float = 15.0
     
     public init() {}
     
@@ -26,10 +26,19 @@ public actor FixedUIDetector {
             return FixedRegions.zero
         }
         
+        let width = keyFrames[0].image.width
+        let height = keyFrames[0].image.height
+        
+        // Calculate device baseline safe area as guaranteed floor
+        let adaptiveConfig = CropConfig.adaptive(for: CGSize(width: width, height: height))
+        let baselineScale: CGFloat = (width >= 1000 ? 3.0 : (width >= 640 ? 2.0 : 1.0))
+        let baselineTop = Int((adaptiveConfig.statusBarHeight * baselineScale).rounded())
+        let baselineBottom = Int((adaptiveConfig.bottomSafeArea * baselineScale).rounded())
+        
         let totalDisplacement = (keyFrames.last?.cumulativeOffset ?? 0) - (keyFrames.first?.cumulativeOffset ?? 0)
         // Ensure there has been sufficient scrolling motion to distinguish static UI from un-scrolled page content
-        guard totalDisplacement >= 80.0 else {
-            return FixedRegions.zero
+        guard totalDisplacement >= 50.0 else {
+            return FixedRegions(topHeight: baselineTop, bottomHeight: baselineBottom)
         }
         
         // Sample spaced keyframes (first, middle, last) to ensure substantial content motion
@@ -41,19 +50,15 @@ public actor FixedUIDetector {
         }
         let sampledFrames = indices.map { keyFrames[$0] }
         
-        let width = sampledFrames[0].image.width
-        let height = sampledFrames[0].image.height
-        
-        let maxTopCheck = min(Int(totalDisplacement * 0.7), min(height / 3, 400))
-        let maxBottomCheck = min(height / 4, 260)
-        guard maxTopCheck > 0 || maxBottomCheck > 0 else { return FixedRegions.zero }
+        let maxTopCheck = min(Int(totalDisplacement * 0.7), min(height / 3, 500))
+        let maxBottomCheck = min(height / 4, 300)
         
         var rowDiffBuffer = [Float](repeating: 0, count: width)
-        var topFixed = 0
-        var bottomFixed = 0
+        var topFixed = baselineTop
+        var bottomFixed = baselineBottom
         
-        // 1. Check top rows (Status bar / Navigation bar) using ROI crop
-        if maxTopCheck > 0 {
+        // 1. Check top rows (Status bar / Navigation bar / Search bar) using ROI crop
+        if maxTopCheck > baselineTop {
             let topRect = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(maxTopCheck))
             let topPixelArrays = sampledFrames.map { kf in
                 PixelBuffer.extractGrayscalePixels(from: kf.image, rect: topRect)
@@ -62,14 +67,14 @@ public actor FixedUIDetector {
             if topPixelArrays.allSatisfy({ $0.count == width * maxTopCheck }) {
                 var consecutiveMismatchesTop = 0
                 for row in 0..<maxTopCheck {
-                    if Task.isCancelled { return FixedRegions.zero }
+                    if Task.isCancelled { return FixedRegions(topHeight: baselineTop, bottomHeight: baselineBottom) }
                     
                     if isRowIdentical(row: row, width: width, pixelArrays: topPixelArrays, diffBuffer: &rowDiffBuffer) {
-                        topFixed = row + 1
+                        topFixed = max(topFixed, row + 1)
                         consecutiveMismatchesTop = 0
                     } else {
                         consecutiveMismatchesTop += 1
-                        if consecutiveMismatchesTop > 2 {
+                        if consecutiveMismatchesTop > 5 {
                             break
                         }
                     }
@@ -78,7 +83,7 @@ public actor FixedUIDetector {
         }
         
         // 2. Check bottom rows (Home indicator / Tab bar) using ROI crop
-        if maxBottomCheck > 0 {
+        if maxBottomCheck > baselineBottom {
             let bottomRect = CGRect(x: 0, y: CGFloat(height - maxBottomCheck), width: CGFloat(width), height: CGFloat(maxBottomCheck))
             let bottomPixelArrays = sampledFrames.map { kf in
                 PixelBuffer.extractGrayscalePixels(from: kf.image, rect: bottomRect)
@@ -87,14 +92,14 @@ public actor FixedUIDetector {
             if bottomPixelArrays.allSatisfy({ $0.count == width * maxBottomCheck }) {
                 var consecutiveMismatchesBottom = 0
                 for localRow in stride(from: maxBottomCheck - 1, through: 0, by: -1) {
-                    if Task.isCancelled { return FixedRegions.zero }
+                    if Task.isCancelled { return FixedRegions(topHeight: baselineTop, bottomHeight: baselineBottom) }
                     
                     if isRowIdentical(row: localRow, width: width, pixelArrays: bottomPixelArrays, diffBuffer: &rowDiffBuffer) {
-                        bottomFixed = maxBottomCheck - localRow
+                        bottomFixed = max(bottomFixed, maxBottomCheck - localRow)
                         consecutiveMismatchesBottom = 0
                     } else {
                         consecutiveMismatchesBottom += 1
-                        if consecutiveMismatchesBottom > 2 {
+                        if consecutiveMismatchesBottom > 5 {
                             break
                         }
                     }

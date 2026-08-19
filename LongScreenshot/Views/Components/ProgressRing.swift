@@ -1,13 +1,11 @@
 import SwiftUI
 
-/// Animated circular progress ring with Apple Music spatial audio visualizer inspired pulsing halo
+/// Animated circular progress ring with Apple Music spatial audio style glowing halo
 public struct ProgressRing: View {
     @Environment(\.colorScheme) private var colorScheme
     public let progress: Double
     public let iconName: String
     public let tintColor: Color
-    
-    @State private var isPulsing: Bool = false
     
     public init(progress: Double, iconName: String, tintColor: Color) {
         self.progress = progress
@@ -19,13 +17,13 @@ public struct ProgressRing: View {
         let isDark = colorScheme == .dark
         
         ZStack {
-            // Ambient spatial pulse halo
+            // Ambient spatial glow halo
             Circle()
                 .fill(
                     RadialGradient(
                         colors: [
-                            tintColor.opacity(isDark ? 0.45 : 0.25),
-                            Color.purple.opacity(isDark ? 0.2 : 0.1),
+                            tintColor.opacity(isDark ? 0.35 : 0.20),
+                            Color.purple.opacity(isDark ? 0.15 : 0.08),
                             Color.clear
                         ],
                         center: .center,
@@ -34,8 +32,6 @@ public struct ProgressRing: View {
                     )
                 )
                 .frame(width: 200, height: 200)
-                .scaleEffect(isPulsing ? 1.15 : 0.95)
-                .opacity(isPulsing ? 0.9 : 0.5)
             
             // Track background
             Circle()
@@ -72,11 +68,6 @@ public struct ProgressRing: View {
                     .font(.system(size: 34, weight: .heavy, design: .rounded))
                     .foregroundStyle(.primary)
                     .contentTransition(.numericText())
-            }
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
-                isPulsing = true
             }
         }
     }

@@ -26,27 +26,37 @@ public struct PreviewView: View {
             MusicAmbientBackground()
             
             // Scrollable & zoomable long image viewer
-            ScrollView([.vertical, .horizontal], showsIndicators: true) {
-                Image(uiImage: viewModel.resultImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .scaleEffect(currentZoomScale)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.35), radius: 24, x: 0, y: 12)
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                pinchScale = value
-                            }
-                            .onEnded { value in
-                                withAnimation(.spring(duration: 0.25)) {
-                                    baseScale = max(1.0, min(baseScale * value, 5.0))
-                                    pinchScale = 1.0
-                                }
-                            }
-                    )
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 70)
+            GeometryReader { geometry in
+                let availableWidth = max(100, geometry.size.width - 32)
+                
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack {
+                        Image(uiImage: viewModel.resultImage)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: availableWidth)
+                            .scaleEffect(currentZoomScale)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 10)
+                            .gesture(
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        pinchScale = value
+                                    }
+                                    .onEnded { value in
+                                        withAnimation(.spring(duration: 0.25)) {
+                                            baseScale = max(1.0, min(baseScale * value, 5.0))
+                                            pinchScale = 1.0
+                                        }
+                                    }
+                            )
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 60)
+                    .padding(.bottom, 100)
+                }
             }
             
             // Top dimensions info badge

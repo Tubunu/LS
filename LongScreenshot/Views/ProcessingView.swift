@@ -200,6 +200,11 @@ public struct ProcessingView: View {
             navigateToPreview = true
             ImageExporter.cleanupTemporaryFiles()
         }
+        .onChange(of: navigateToPreview) { _, isPresented in
+            if !isPresented && finalResultImage != nil {
+                dismiss()
+            }
+        }
         .navigationDestination(isPresented: $navigateToPreview) {
             if let image = finalResultImage {
                 PreviewView(resultImage: image, onDismissToRoot: {

@@ -41,12 +41,18 @@ public actor ScrollDetector {
             let previousImage = frames[i - 1].image
             let currentImage = frames[i].image
             
+            let h = CGFloat(previousImage.height)
+            let w = CGFloat(previousImage.width)
+            let contentROI = CGRect(x: 0, y: (h * 0.12).rounded(), width: w, height: (h * 0.76).rounded()).integral
+            let prevContent = previousImage.safeCropping(to: contentROI) ?? previousImage
+            let currContent = currentImage.safeCropping(to: contentROI) ?? currentImage
+            
             let request = VNTranslationalImageRegistrationRequest(
-                targetedCGImage: currentImage
+                targetedCGImage: currContent
             )
             
             do {
-                try sequenceHandler.perform([request], on: previousImage, orientation: .up)
+                try sequenceHandler.perform([request], on: prevContent, orientation: .up)
             } catch {
                 AppLogger.vision.warning("Vision registration failed at frame \(i): \(error.localizedDescription)")
             }

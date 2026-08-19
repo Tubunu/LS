@@ -34,7 +34,7 @@ public enum PixelBuffer {
             width: width,
             height: height,
             bitsPerComponent: 8,
-            bytesPerRow: width,
+            bytesPerRow: 0,
             space: grayColorSpace,
             bitmapInfo: CGImageAlphaInfo.none.rawValue
         ), let dataPtr = context.data else {

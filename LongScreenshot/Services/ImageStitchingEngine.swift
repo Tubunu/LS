@@ -46,8 +46,13 @@ public actor ImageStitchingEngine {
         let topHeaderHeight = Int((105.0 * baselineScale).rounded())
         let bottomFooterHeight = Int((85.0 * baselineScale).rounded())
         
-        // 2. Sequentially find scroll displacement deltaY between adjacent pairs
-        var deltaYs: [Int] = []
+        // 2. Sequentially find overlap cut points between adjacent pairs
+        struct PairCut {
+            let cutY1: Int // Cut point in previous image (img1)
+            let cutY2: Int // Continuing point in next image (img2)
+        }
+        
+        var pairCuts: [PairCut] = []
         for i in 0..<(totalCount - 1) {
             if Task.isCancelled { throw RecordingError.processingCancelled }
             
@@ -58,18 +63,18 @@ public actor ImageStitchingEngine {
             let img2 = cgImages[i + 1]
             
             if let overlap = await overlapDetector.findOverlap(bottomOf: img1, topOf: img2) {
-                let dy = max(10, min(height, height - overlap.overlapHeight))
-                deltaYs.append(dy)
+                pairCuts.append(PairCut(cutY1: overlap.refY, cutY2: overlap.matchY))
             } else {
-                AppLogger.stitching.warning("Failed to find strong overlap between image \(i) and \(i + 1). Using default viewport scroll distance.")
-                let defaultScroll = max(100, height - topHeaderHeight - bottomFooterHeight)
-                deltaYs.append(defaultScroll)
+                AppLogger.stitching.warning("Failed to find strong overlap between image \(i) and \(i + 1). Using default safe cut.")
+                let defaultCutY1 = max(topHeaderHeight + 50, height - bottomFooterHeight)
+                let defaultCutY2 = min(height - bottomFooterHeight - 50, topHeaderHeight)
+                pairCuts.append(PairCut(cutY1: defaultCutY1, cutY2: defaultCutY2))
             }
         }
         
         if Task.isCancelled { throw RecordingError.processingCancelled }
         
-        // 3. Compute clean 3-zone slices (Header once, Pure Scrolling Body, Footer once)
+        // 3. Compute seamless slices
         struct ImageSlice {
             let image: CGImage
             let srcRect: CGRect
@@ -80,8 +85,8 @@ public actor ImageStitchingEngine {
         var slices: [ImageSlice] = []
         var currentCanvasY: CGFloat = 0
         
-        // Image 0: Top Header + First Screen Body (omits Image 0's bottom toolbar)
-        let firstSliceHeight = min(height - bottomFooterHeight, topHeaderHeight + deltaYs[0])
+        // Image 0: Top Header + Body up to cutY1 of first pair
+        let firstSliceHeight = max(10, pairCuts[0].cutY1)
         let firstRect = CGRect(x: 0, y: 0, width: width, height: firstSliceHeight)
         slices.append(ImageSlice(
             image: cgImages[0],
@@ -91,12 +96,12 @@ public actor ImageStitchingEngine {
         ))
         currentCanvasY += CGFloat(firstSliceHeight)
         
-        // Middle Images: Only Pure Scrolling Body (omits top headers & bottom toolbars)
+        // Middle Images: From cutY2 of previous pair to cutY1 of next pair
         for i in 1..<(totalCount - 1) {
-            let dy = deltaYs[i]
-            let srcY = topHeaderHeight
-            let sliceH = min(dy, height - topHeaderHeight - bottomFooterHeight)
-            let srcRect = CGRect(x: 0, y: srcY, width: width, height: sliceH)
+            let startY = pairCuts[i - 1].cutY2
+            let endY = pairCuts[i].cutY1
+            let sliceH = max(10, endY - startY)
+            let srcRect = CGRect(x: 0, y: startY, width: width, height: sliceH)
             
             slices.append(ImageSlice(
                 image: cgImages[i],
@@ -107,11 +112,11 @@ public actor ImageStitchingEngine {
             currentCanvasY += CGFloat(sliceH)
         }
         
-        // Last Image: Starts strictly below top header, draws all the way to bottom footer
+        // Last Image: From cutY2 of last pair to bottom of image
         let lastIndex = totalCount - 1
-        let lastSrcY = topHeaderHeight
-        let lastSliceH = max(10, height - lastSrcY)
-        let lastRect = CGRect(x: 0, y: lastSrcY, width: width, height: lastSliceH)
+        let lastStartY = pairCuts[lastIndex - 1].cutY2
+        let lastSliceH = max(10, height - lastStartY)
+        let lastRect = CGRect(x: 0, y: lastStartY, width: width, height: lastSliceH)
         slices.append(ImageSlice(
             image: cgImages[lastIndex],
             srcRect: lastRect,
@@ -260,20 +265,44 @@ public actor ImageStitchingEngine {
         format.opaque = true
         
         let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
-        let stitchedImage = renderer.image { _ in
+        let stitchedImage = renderer.image { context in
+            let ctx = context.cgContext
+            
             // 2.1 Draw Status Bar & Header once from first frame
             if topCrop > 0, let firstFull = keyFrames.first?.image,
                let topPart = firstFull.safeCropping(to: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop))) {
                 UIImage(cgImage: topPart).draw(in: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop)))
             }
             
-            // 2.2 Draw Sequential Body Slices
-            for slice in slices {
+            // 2.2 Draw Sequential Body Slices with smooth seam blending
+            for (index, slice) in slices.enumerated() {
                 autoreleasepool {
-                    if let cropped = slice.frame.safeCropping(to: slice.srcRect) {
-                        // Add 1.0px vertical overlap bleed to eliminate subpixel white line gaps between slices
-                        let renderRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height + 1.0)
-                        UIImage(cgImage: cropped).draw(in: renderRect)
+                    guard let cropped = slice.frame.safeCropping(to: slice.srcRect) else { return }
+                    let sliceH = slice.srcRect.height
+                    
+                    if index == 0 {
+                        UIImage(cgImage: cropped).draw(in: CGRect(x: 0, y: slice.destY, width: cgWidth, height: sliceH))
+                    } else {
+                        let blendBand = min(12, Int(sliceH / 4))
+                        if blendBand > 0 {
+                            self.drawBlendedSlice(
+                                ctx: ctx,
+                                frame: cropped,
+                                blendStartY: slice.destY,
+                                transitionHeight: blendBand,
+                                cgWidth: cgWidth
+                            )
+                            let newContentY = CGFloat(blendBand)
+                            let newContentH = sliceH - newContentY
+                            if newContentH > 0 {
+                                let newRect = CGRect(x: 0, y: newContentY, width: cgWidth, height: newContentH).integral
+                                if let newPart = cropped.safeCropping(to: newRect) {
+                                    UIImage(cgImage: newPart).draw(in: CGRect(x: 0, y: slice.destY + newContentY, width: cgWidth, height: newContentH + 1.0))
+                                }
+                            }
+                        } else {
+                            UIImage(cgImage: cropped).draw(in: CGRect(x: 0, y: slice.destY, width: cgWidth, height: sliceH + 1.0))
+                        }
                     }
                 }
             }

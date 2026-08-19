@@ -113,8 +113,11 @@ public actor OverlapDetector {
             
             if confidence >= Self.minConfidenceThreshold && confidence > bestOverallConfidence {
                 bestOverallConfidence = confidence
+                let centerRefY = refY + stripHeight / 2
+                let centerMatchY = bestOffset + stripHeight / 2
                 bestOverallResult = OverlapResult(
-                    offset: bestOffset,
+                    refY: centerRefY,
+                    matchY: centerMatchY,
                     confidence: confidence,
                     overlapHeight: overlapHeight
                 )

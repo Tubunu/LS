@@ -8,7 +8,9 @@ public struct RecordingPickerView: View {
     @State private var videoURL: URL?
     @State private var videoDuration: String = ""
     @State private var videoThumbnail: UIImage?
-    @State private var navigateToProcessing = false
+    @State private var isProcessing = false
+    @State private var processedResultImage: UIImage? = nil
+    @State private var navigateToPreview = false
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
@@ -156,7 +158,7 @@ public struct RecordingPickerView: View {
                     
                     if videoURL != nil {
                         Button {
-                            navigateToProcessing = true
+                            isProcessing = true
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "wand.and.stars")
@@ -191,9 +193,20 @@ public struct RecordingPickerView: View {
         .onChange(of: selectedVideoItem) { _, newItem in
             loadVideo(from: newItem)
         }
-        .navigationDestination(isPresented: $navigateToProcessing) {
+        .fullScreenCover(isPresented: $isProcessing) {
             if let url = videoURL {
-                ProcessingView(mode: .recording(url))
+                ProcessingView(mode: .recording(url), onComplete: { result in
+                    processedResultImage = result
+                    isProcessing = false
+                    navigateToPreview = true
+                }, onCancel: {
+                    isProcessing = false
+                })
+            }
+        }
+        .navigationDestination(isPresented: $navigateToPreview) {
+            if let processedResultImage {
+                PreviewView(resultImage: processedResultImage)
             }
         }
         .animation(.spring(duration: 0.3), value: videoURL)

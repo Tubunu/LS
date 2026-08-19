@@ -4,7 +4,9 @@ import PhotosUI
 /// View for selecting multiple screenshots from photo album and organizing them for stitching
 public struct ScreenshotPickerView: View {
     @StateObject private var viewModel = ScreenshotViewModel()
-    @State private var navigateToProcessing = false
+    @State private var isProcessing = false
+    @State private var processedResultImage: UIImage? = nil
+    @State private var navigateToPreview = false
     @Environment(\.dismiss) private var dismiss
     
     public init() {}
@@ -170,7 +172,7 @@ public struct ScreenshotPickerView: View {
                     
                     if viewModel.selectedImages.count >= 2 {
                         Button {
-                            navigateToProcessing = true
+                            isProcessing = true
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "sparkles")
@@ -202,8 +204,19 @@ public struct ScreenshotPickerView: View {
         }
         .navigationTitle("截图拼接")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $navigateToProcessing) {
-            ProcessingView(mode: .screenshot(viewModel.selectedImages))
+        .fullScreenCover(isPresented: $isProcessing) {
+            ProcessingView(mode: .screenshot(viewModel.selectedImages), onComplete: { result in
+                processedResultImage = result
+                isProcessing = false
+                navigateToPreview = true
+            }, onCancel: {
+                isProcessing = false
+            })
+        }
+        .navigationDestination(isPresented: $navigateToPreview) {
+            if let processedResultImage {
+                PreviewView(resultImage: processedResultImage)
+            }
         }
         .animation(.spring(duration: 0.3), value: viewModel.selectedImages.count)
     }

@@ -3,10 +3,11 @@ import SwiftUI
 /// Unified processing screen that visualizes real-time progress for both screenshot and recording stitching
 public struct ProcessingView: View {
     public let mode: ProcessingMode
+    public var onComplete: ((UIImage) -> Void)?
+    public var onCancel: (() -> Void)?
     
     @StateObject private var screenshotVM = ScreenshotStitchingViewModel()
     @StateObject private var recordingVM = RecordingViewModel()
-    @State private var navigateToPreview = false
     @Environment(\.dismiss) private var dismiss
     
     // User configuration bindings
@@ -15,8 +16,14 @@ public struct ProcessingView: View {
     @AppStorage(AppSettings.recordingSamplingFPSKey) private var samplingFPS: Double = AppSettings.defaultRecordingSamplingFPS
     @AppStorage(AppSettings.keyFrameThresholdKey) private var keyFrameThreshold: Double = AppSettings.defaultKeyFrameThreshold
     
-    public init(mode: ProcessingMode) {
+    public init(
+        mode: ProcessingMode,
+        onComplete: ((UIImage) -> Void)? = nil,
+        onCancel: (() -> Void)? = nil
+    ) {
         self.mode = mode
+        self.onComplete = onComplete
+        self.onCancel = onCancel
     }
     
     private var currentProgress: Double {
@@ -90,7 +97,11 @@ public struct ProcessingView: View {
                     if isCurrentlyProcessing && currentErrorMessage == nil {
                         Button {
                             cancelCurrentProcessing()
-                            dismiss()
+                            if let onCancel {
+                                onCancel()
+                            } else {
+                                dismiss()
+                            }
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "xmark")
@@ -106,47 +117,25 @@ public struct ProcessingView: View {
                         .padding(.top, 6)
                     }
                     
-                    // Finished state buttons (if user dismisses preview back to processing)
+                    // Finished state fallback
                     if !isCurrentlyProcessing && finalResultImage != nil {
-                        HStack(spacing: 14) {
-                            Button {
+                        Button {
+                            if let onCancel {
+                                onCancel()
+                            } else {
                                 dismiss()
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "house.fill")
-                                    Text("返回主页")
-                                }
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 10)
                             }
-                            .glassEffect(.regular.interactive, in: .capsule)
-                            
-                            Button {
-                                navigateToPreview = true
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.up.right.and.arrow.down.left.rectangle")
-                                    Text("查看长图")
-                                }
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 10)
-                                .background(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.98, green: 0.14, blue: 0.24),
-                                            Color(red: 0.66, green: 0.13, blue: 0.84)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .clipShape(Capsule())
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "house.fill")
+                                Text("返回主页")
                             }
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
                         }
+                        .glassEffect(.regular.interactive, in: .capsule)
                         .padding(.top, 8)
                     }
                 }
@@ -169,7 +158,11 @@ public struct ProcessingView: View {
                             .multilineTextAlignment(.center)
                         
                         Button {
-                            dismiss()
+                            if let onCancel {
+                                onCancel()
+                            } else {
+                                dismiss()
+                            }
                         } label: {
                             Text("返回重新选择")
                                 .font(.system(size: 14, weight: .bold))
@@ -196,20 +189,10 @@ public struct ProcessingView: View {
             await startProcessing()
         }
         .onChange(of: finalResultImage) { _, image in
-            guard image != nil, !navigateToPreview else { return }
-            navigateToPreview = true
+            guard let image else { return }
             ImageExporter.cleanupTemporaryFiles()
-        }
-        .onChange(of: navigateToPreview) { _, isPresented in
-            if !isPresented && finalResultImage != nil {
-                dismiss()
-            }
-        }
-        .navigationDestination(isPresented: $navigateToPreview) {
-            if let image = finalResultImage {
-                PreviewView(resultImage: image, onDismissToRoot: {
-                    dismiss()
-                })
+            if let onComplete {
+                onComplete(image)
             }
         }
     }

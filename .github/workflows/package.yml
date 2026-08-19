@@ -21,12 +21,17 @@ jobs:
       - name: 检出代码 (Checkout Code)
         uses: actions/checkout@v4
 
-      - name: 配置 Xcode 环境 (Select Xcode)
+      - name: 检查 Xcode 版本环境 (Check Xcode Environment)
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          ls -d /Applications/Xcode* || true
+          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode.app || true
           xcodebuild -version
 
-      - name: 编译 Release App (xcodebuild)
+      - name: 核心算法与逻辑单元测试 (Swift Package Test)
+        run: |
+          swift test
+
+      - name: 编译 iOS Release App (xcodebuild)
         run: |
           xcodebuild build \
             -project LongScreenshot.xcodeproj \
@@ -36,9 +41,7 @@ jobs:
             -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_ENTITLEMENTS="" \
-            CODE_SIGNING_INJECT_BASE_ENTITLEMENTS=NO
+            CODE_SIGNING_ALLOWED=NO
 
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |

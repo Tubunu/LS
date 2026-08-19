@@ -26,14 +26,14 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
-      - name: 编译与生成 Release 归档 (xcodebuild archive)
+      - name: 编译 Release App (xcodebuild)
         run: |
-          xcodebuild archive \
+          xcodebuild build \
             -project LongScreenshot.xcodeproj \
             -scheme LongScreenshot \
-            -destination 'generic/platform=iOS' \
-            -archivePath "build/LongScreenshot.xcarchive" \
+            -sdk iphoneos \
             -configuration Release \
+            -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
@@ -41,7 +41,9 @@ jobs:
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |
           mkdir -p build/Payload
-          cp -r "build/LongScreenshot.xcarchive/Products/Applications/LongScreenshot.app" build/Payload/
+          APP_PATH=$(find build/DerivedData -name "LongScreenshot.app" -type d | head -n 1)
+          echo "Found app at: $APP_PATH"
+          cp -r "$APP_PATH" build/Payload/
           cd build
           zip -r LongScreenshot-Release.ipa Payload
           cd ..

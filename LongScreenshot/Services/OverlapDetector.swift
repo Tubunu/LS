@@ -11,17 +11,18 @@ public actor OverlapDetector {
     
     public init() {}
     
-    /// Finds the optimal overlap offset between the bottom portion of image1 and top portion of image2
+    /// Finds the optimal overlap offset and vertical displacement between image1 and image2
+    /// using multi-band safe sampling to avoid floating buttons at bottom and sticky headers at top.
     /// - Parameters:
     ///   - image1: The upper image (CGImage)
     ///   - image2: The lower image (CGImage)
-    ///   - referenceStripHeight: Height of the sample strip taken from the bottom of image1 (default: 200px)
-    ///   - searchRange: Maximum height to search in image2 (0 = full height of image2)
-    /// - Returns: OverlapResult if a match with confidence >= 0.50 is found, nil otherwise
+    ///   - referenceStripHeight: Height of sample strips (default: 160px)
+    ///   - searchRange: Maximum search range (0 = full height)
+    /// - Returns: OverlapResult with verified displacement and overlap height
     public func findOverlap(
         bottomOf image1: CGImage,
         topOf image2: CGImage,
-        referenceStripHeight: Int = 200,
+        referenceStripHeight: Int = 160,
         searchRange: Int = 0
     ) -> OverlapResult? {
         let width1 = image1.width
@@ -34,93 +35,102 @@ public actor OverlapDetector {
         let height1 = image1.height
         let height2 = image2.height
         
-        let stripHeight = min(referenceStripHeight, min(height1 / 3, height2 / 3))
+        let stripHeight = min(referenceStripHeight, min(height1 / 4, height2 / 4))
         guard stripHeight >= 20 else { return nil }
         
-        let actualSearchRange = searchRange > 0 ? min(searchRange, height2) : height2
-        let maxOffset = actualSearchRange - stripHeight
-        guard maxOffset > 0 else { return nil }
+        let searchAreaHeight = searchRange > 0 ? min(searchRange, height2) : height2
+        let maxSearchOffset = searchAreaHeight - stripHeight
+        guard maxSearchOffset > 0 else { return nil }
         
-        // 1. Extract reference strip from the bottom of image1 (rows: height1 - stripHeight ..< height1)
-        let refRect = CGRect(
-            x: 0,
-            y: CGFloat(height1 - stripHeight),
-            width: CGFloat(width),
-            height: CGFloat(stripHeight)
-        )
-        let refStrip = PixelBuffer.extractGrayscalePixels(from: image1, rect: refRect)
-        
-        // 2. Extract search area from the top of image2 (rows: 0 ..< actualSearchRange)
-        let searchRect = CGRect(
-            x: 0,
-            y: 0,
-            width: CGFloat(width),
-            height: CGFloat(actualSearchRange)
-        )
+        // Extract full search area from image2 once
+        let searchRect = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(searchAreaHeight))
         let searchArea = PixelBuffer.extractGrayscalePixels(from: image2, rect: searchRect)
-        
         let stripPixelCount = stripHeight * width
-        guard refStrip.count == stripPixelCount, searchArea.count >= (maxOffset + stripHeight) * width else {
-            return nil
-        }
+        guard searchArea.count >= searchAreaHeight * width else { return nil }
         
-        var bestOffset = 0
-        var bestSAD: Float = Float.infinity
-        var minSADCount = 0
+        // Multi-depth candidate sampling ratios in image1 (65%, 55%, 75%, 45%, 82%)
+        // This avoids bottom floating buttons / toolbars and top sticky headers
+        let candidateRatios: [Double] = [0.65, 0.55, 0.75, 0.45, 0.82]
         
-        // 3. Slide the reference strip across the search area using zero-allocation pointer arithmetic
+        var bestOverallResult: OverlapResult? = nil
+        var bestOverallConfidence: Float = 0.0
         var diffBuffer = [Float](repeating: 0, count: stripPixelCount)
         
-        let foundBest = refStrip.withUnsafeBufferPointer { refPtr -> Bool in
-            guard let refBase = refPtr.baseAddress else { return false }
-            return searchArea.withUnsafeBufferPointer { searchPtr -> Bool in
-                guard let searchBase = searchPtr.baseAddress else { return false }
-                return diffBuffer.withUnsafeMutableBufferPointer { diffPtr -> Bool in
-                    guard let diffBase = diffPtr.baseAddress else { return false }
-                    
-                    for offset in 0..<maxOffset {
-                        let currentSearchPtr = searchBase.advanced(by: offset * width)
-                        let sad = PixelBuffer.computeSADDirect(
-                            ptrA: refBase,
-                            ptrB: currentSearchPtr,
-                            count: stripPixelCount,
-                            diffBuffer: diffBase
-                        )
+        for ratio in candidateRatios {
+            let refCenterY = Int(Double(height1) * ratio)
+            let refY = max(0, min(height1 - stripHeight, refCenterY - stripHeight / 2))
+            
+            let refRect = CGRect(x: 0, y: CGFloat(refY), width: CGFloat(width), height: CGFloat(stripHeight))
+            let refStrip = PixelBuffer.extractGrayscalePixels(from: image1, rect: refRect)
+            guard refStrip.count == stripPixelCount else { continue }
+            
+            var bestOffset = 0
+            var bestSAD: Float = Float.infinity
+            var minSADCount = 0
+            
+            let found = refStrip.withUnsafeBufferPointer { refPtr -> Bool in
+                guard let refBase = refPtr.baseAddress else { return false }
+                return searchArea.withUnsafeBufferPointer { searchPtr -> Bool in
+                    guard let searchBase = searchPtr.baseAddress else { return false }
+                    return diffBuffer.withUnsafeMutableBufferPointer { diffPtr -> Bool in
+                        guard let diffBase = diffPtr.baseAddress else { return false }
                         
-                        if sad < bestSAD - 0.05 {
-                            bestSAD = sad
-                            bestOffset = offset
-                            minSADCount = 1
-                        } else if abs(sad - bestSAD) <= 0.05 {
-                            minSADCount += 1
+                        for offset in 0..<maxSearchOffset {
+                            let currentSearchPtr = searchBase.advanced(by: offset * width)
+                            let sad = PixelBuffer.computeSADDirect(
+                                ptrA: refBase,
+                                ptrB: currentSearchPtr,
+                                count: stripPixelCount,
+                                diffBuffer: diffBase
+                            )
+                            
+                            if sad < bestSAD - 0.05 {
+                                bestSAD = sad
+                                bestOffset = offset
+                                minSADCount = 1
+                            } else if abs(sad - bestSAD) <= 0.05 {
+                                minSADCount += 1
+                            }
                         }
+                        return true
                     }
-                    return true
+                }
+            }
+            
+            guard found else { continue }
+            
+            var confidence = max(0, 1.0 - bestSAD / Self.maxSADConfidenceScale)
+            if minSADCount > 3 && bestSAD < Self.minAmbiguitySADThreshold {
+                confidence = max(0, confidence - 0.4)
+            }
+            
+            // Displacement between image1 and image2: deltaY = refY - bestOffset
+            let deltaY = refY - bestOffset
+            // Valid scroll motion: image2 is scrolled down relative to image1, so deltaY must be positive
+            guard deltaY > 10, deltaY < height1 else { continue }
+            
+            let overlapHeight = height1 - deltaY
+            
+            if confidence >= Self.minConfidenceThreshold && confidence > bestOverallConfidence {
+                bestOverallConfidence = confidence
+                bestOverallResult = OverlapResult(
+                    offset: bestOffset,
+                    confidence: confidence,
+                    overlapHeight: overlapHeight
+                )
+                // If confidence is exceptionally high, early return
+                if confidence > 0.85 {
+                    break
                 }
             }
         }
         
-        guard foundBest else { return nil }
-        
-        // 4. Calculate confidence: 0 SAD difference -> 1.0 confidence, difference of 50 -> 0.0
-        var confidence = max(0, 1.0 - bestSAD / Self.maxSADConfidenceScale)
-        
-        // Ambiguity suppression: If multiple disparate offsets produce near-identical minimum SAD (e.g. flat solid color area), penalize confidence
-        if minSADCount > 3 && bestSAD < Self.minAmbiguitySADThreshold {
-            confidence = max(0, confidence - 0.4)
+        if let result = bestOverallResult {
+            AppLogger.stitching.info("Overlap detected successfully: overlapHeight=\(result.overlapHeight), confidence=\(result.confidence)")
+            return result
         }
         
-        guard confidence >= Self.minConfidenceThreshold else {
-            AppLogger.stitching.warning("Overlap confidence too low: \(confidence, privacy: .public), bestSAD: \(bestSAD, privacy: .public)")
-            return nil
-        }
-        
-        // Geometry Note:
-        // - The reference strip is taken from image1's bottom: [height1 - stripHeight, height1].
-        // - In image2, this strip matches at [bestOffset, bestOffset + stripHeight].
-        // - Therefore, all of image2 from row 0 to (bestOffset + stripHeight) overlaps with the bottom of image1.
-        // - Total overlapping height between image1 and image2 is thus exactly `stripHeight + bestOffset`.
-        let overlapHeight = stripHeight + bestOffset
-        return OverlapResult(offset: bestOffset, confidence: confidence, overlapHeight: overlapHeight)
+        AppLogger.stitching.warning("Overlap confidence too low across all multi-band candidates")
+        return nil
     }
 }

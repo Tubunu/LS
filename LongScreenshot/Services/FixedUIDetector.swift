@@ -50,8 +50,8 @@ public actor FixedUIDetector {
         }
         let sampledFrames = indices.map { keyFrames[$0] }
         
-        let maxTopCheck = min(Int(totalDisplacement * 0.7), min(height / 3, 500))
-        let maxBottomCheck = min(height / 4, 300)
+        let maxTopCheck = min(Int(totalDisplacement * 0.7), min(height / 3, 550))
+        let maxBottomCheck = min(height / 3, 500)
         
         var rowDiffBuffer = [Float](repeating: 0, count: width)
         var topFixed = baselineTop
@@ -74,7 +74,7 @@ public actor FixedUIDetector {
                         consecutiveMismatchesTop = 0
                     } else {
                         consecutiveMismatchesTop += 1
-                        if consecutiveMismatchesTop > 5 {
+                        if consecutiveMismatchesTop > 35 {
                             break
                         }
                     }
@@ -82,7 +82,7 @@ public actor FixedUIDetector {
             }
         }
         
-        // 2. Check bottom rows (Home indicator / Tab bar) using ROI crop
+        // 2. Check bottom rows (Home indicator / Tab bar / Floating buttons) using ROI crop
         if maxBottomCheck > baselineBottom {
             let bottomRect = CGRect(x: 0, y: CGFloat(height - maxBottomCheck), width: CGFloat(width), height: CGFloat(maxBottomCheck))
             let bottomPixelArrays = sampledFrames.map { kf in
@@ -99,7 +99,7 @@ public actor FixedUIDetector {
                         consecutiveMismatchesBottom = 0
                     } else {
                         consecutiveMismatchesBottom += 1
-                        if consecutiveMismatchesBottom > 5 {
+                        if consecutiveMismatchesBottom > 35 {
                             break
                         }
                     }

@@ -28,7 +28,6 @@ jobs:
 
       - name: 编译 iOS Release App (xcodebuild)
         run: |
-          set -o pipefail
           xcodebuild clean build \
             -project LongScreenshot.xcodeproj \
             -scheme LongScreenshot \
@@ -38,7 +37,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO 2>&1 | tee xcodebuild.log || (echo "=== XCODEBUILD ERROR LOG ===" && tail -n 150 xcodebuild.log && exit 1)
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |
@@ -75,13 +74,6 @@ jobs:
             2. 使用 [Sideloadly](https://sideloadly.io/) 或 [AltStore](https://altstore.io/) 连接 iPhone，用你的 Apple ID 免费自签即可直接安装到真机！
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 上传构建日志 (Upload Build Log if Failed)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: XcodeBuild-Error-Log
-          path: xcodebuild.log
 
       - name: 部署至 TestFlight (可选，需配置证书秘钥)
         if: ${{ inputs.upload_testflight == true && env.APPSTORE_PRIVATE_KEY != '' }}

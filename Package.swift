@@ -9,14 +9,14 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "LongScreenshotCore",
-            targets: ["LongScreenshotCore"]
+            name: "LongScreenshot",
+            targets: ["LongScreenshot"]
         ),
     ],
     dependencies: [],
     targets: [
         .target(
-            name: "LongScreenshotCore",
+            name: "LongScreenshot",
             dependencies: [],
             path: "LongScreenshot",
             exclude: [
@@ -27,7 +27,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LongScreenshotTests",
-            dependencies: ["LongScreenshotCore"],
+            dependencies: ["LongScreenshot"],
             path: "LongScreenshotTests"
         ),
     ]

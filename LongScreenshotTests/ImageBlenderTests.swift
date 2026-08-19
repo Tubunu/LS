@@ -1,6 +1,6 @@
 import XCTest
 import CoreGraphics
-@testable import LongScreenshotCore
+@testable import LongScreenshot
 
 final class ImageBlenderTests: XCTestCase {
     

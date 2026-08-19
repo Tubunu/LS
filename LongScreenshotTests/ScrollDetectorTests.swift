@@ -1,7 +1,7 @@
 import XCTest
 import CoreGraphics
 import CoreMedia
-@testable import LongScreenshotCore
+@testable import LongScreenshot
 
 final class ScrollDetectorTests: XCTestCase {
     

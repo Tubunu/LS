@@ -424,29 +424,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A001 /* PixelBuffer.swift in Sources */,
-				A002 /* Logger.swift in Sources */,
-				A003 /* ProcessingMode.swift in Sources */,
-				A004 /* Movie.swift in Sources */,
-				A005 /* CropConfig.swift in Sources */,
-				A006 /* OverlapInfo.swift in Sources */,
-				A007 /* KeyFrame.swift in Sources */,
-				A008 /* FrameDisplacement.swift in Sources */,
-				A009 /* RecordingError.swift in Sources */,
-				A010 /* StitchingResult.swift in Sources */,
-				A011 /* AppSettings.swift in Sources */,
-				A012 /* CGImage+Crop.swift in Sources */,
-				A013 /* UIImage+Resize.swift in Sources */,
-				A014 /* View+GlassStyle.swift in Sources */,
-				A015 /* ImagePreprocessor.swift in Sources */,
-				A016 /* OverlapDetector.swift in Sources */,
-				A017 /* ImageBlender.swift in Sources */,
-				A018 /* VideoFrameExtractor.swift in Sources */,
-				A019 /* ScrollDetector.swift in Sources */,
-				A020 /* KeyFrameSelector.swift in Sources */,
-				A021 /* FixedUIDetector.swift in Sources */,
-				A022 /* ImageExporter.swift in Sources */,
-				A023 /* ImageStitchingEngine.swift in Sources */,
 				A050 /* OverlapDetectorTests.swift in Sources */,
 				A051 /* ImageBlenderTests.swift in Sources */,
 				A052 /* ScrollDetectorTests.swift in Sources */,
@@ -606,6 +583,9 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Debug;
 		};
@@ -633,6 +613,9 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Release;
 		};
@@ -649,6 +632,9 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LongScreenshot.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LongScreenshot";
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Debug;
 		};
@@ -665,6 +651,9 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LongScreenshot.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LongScreenshot";
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Release;
 		};

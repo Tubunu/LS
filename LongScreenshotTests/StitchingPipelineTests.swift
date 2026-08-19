@@ -1,6 +1,6 @@
 import XCTest
 import UIKit
-@testable import LongScreenshotCore
+@testable import LongScreenshot
 
 final class StitchingPipelineTests: XCTestCase {
     

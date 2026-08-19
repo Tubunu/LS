@@ -31,18 +31,20 @@ jobs:
           xcodebuild build \
             -project LongScreenshot.xcodeproj \
             -scheme LongScreenshot \
-            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -configuration Release \
             -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            CODE_SIGNING_INJECT_BASE_ENTITLEMENTS=NO
 
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |
           mkdir -p build/Payload
           APP_PATH=$(find build/DerivedData -name "LongScreenshot.app" -type d | head -n 1)
-          echo "Found app at: $APP_PATH"
+          echo "Found compiled app at: $APP_PATH"
           cp -r "$APP_PATH" build/Payload/
           cd build
           zip -r LongScreenshot-Release.ipa Payload

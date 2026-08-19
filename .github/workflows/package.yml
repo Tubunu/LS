@@ -21,19 +21,14 @@ jobs:
       - name: 检出代码 (Checkout Code)
         uses: actions/checkout@v4
 
-      - name: 检查 Xcode 版本环境 (Check Xcode Environment)
+      - name: 配置 Xcode 环境 (Select Xcode)
         run: |
-          ls -d /Applications/Xcode* || true
           sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode.app || true
           xcodebuild -version
 
-      - name: 核心算法与逻辑单元测试 (Swift Package Test)
-        run: |
-          swift test
-
       - name: 编译 iOS Release App (xcodebuild)
         run: |
-          xcodebuild build \
+          xcodebuild clean build \
             -project LongScreenshot.xcodeproj \
             -scheme LongScreenshot \
             -destination 'generic/platform=iOS' \

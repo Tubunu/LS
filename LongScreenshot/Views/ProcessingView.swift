@@ -124,7 +124,7 @@ public struct ProcessingView: View {
         .task {
             startProcessing()
         }
-        .onChange(of: finalResultImage) { _, newImage in
+        .onChange(of: finalResultImage) { newImage in
             if newImage != nil {
                 navigateToPreview = true
             }

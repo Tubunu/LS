@@ -187,7 +187,7 @@ public struct RecordingPickerView: View {
         }
         .navigationTitle("录屏转长图")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: selectedVideoItem) { _, newItem in
+        .onChange(of: selectedVideoItem) { newItem in
             loadVideo(from: newItem)
         }
         .navigationDestination(isPresented: $navigateToProcessing) {

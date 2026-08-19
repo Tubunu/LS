@@ -37,22 +37,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO > xcodebuild_raw.log 2>&1 || {
-              echo "### ❌ Xcode 编译失败日志" >> $GITHUB_STEP_SUMMARY
-              echo '```text' >> $GITHUB_STEP_SUMMARY
-              tail -n 120 xcodebuild_raw.log >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              cat xcodebuild_raw.log
-              exit 1
-            }
-          tail -n 30 xcodebuild_raw.log
-
-      - name: 上传构建日志 (Upload Raw Log)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: XcodeBuild-Raw-Log
-          path: xcodebuild_raw.log
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |

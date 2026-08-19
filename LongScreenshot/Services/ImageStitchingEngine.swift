@@ -97,14 +97,16 @@ public actor ImageStitchingEngine {
         let topCrop = fixedRegions.topHeight
         let bottomCrop = fixedRegions.bottomHeight
         let effectiveContentHeight = max(10, height - topCrop - bottomCrop)
+        let cgWidth = CGFloat(width)
+        let cgEffectiveHeight = CGFloat(effectiveContentHeight)
         
         // 1. Crop fixed UI from each keyframe
         let croppedFrames: [CGImage] = keyFrames.compactMap { kf in
             let cropRect = CGRect(
                 x: 0,
                 y: CGFloat(topCrop),
-                width: CGFloat(width),
-                height: CGFloat(effectiveContentHeight)
+                width: cgWidth,
+                height: cgEffectiveHeight
             )
             return kf.image.safeCropping(to: cropRect)
         }
@@ -129,7 +131,7 @@ public actor ImageStitchingEngine {
         progressHandler(0.90, "正在合成长截图画布（\(width)×\(totalCanvasHeight)px）...")
         
         // 3. Render into canvas
-        let canvasSize = CGSize(width: width, height: totalCanvasHeight)
+        let canvasSize = CGSize(width: cgWidth, height: CGFloat(totalCanvasHeight))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1.0
         format.opaque = true
@@ -139,11 +141,11 @@ public actor ImageStitchingEngine {
             let ctx = context.cgContext
             
             for (index, frame) in croppedFrames.enumerated() {
-                let yOffset = offsets[index]
+                let yOffset = CGFloat(offsets[index])
                 
                 if index == 0 {
                     // First frame rendered completely
-                    ctx.draw(frame, in: CGRect(x: 0, y: yOffset, width: width, height: effectiveContentHeight))
+                    ctx.draw(frame, in: CGRect(x: 0, y: yOffset, width: cgWidth, height: cgEffectiveHeight))
                 } else {
                     let stepDelta = offsets[index] - offsets[index - 1]
                     let overlap = max(0, effectiveContentHeight - stepDelta)
@@ -154,11 +156,11 @@ public actor ImageStitchingEngine {
                         let blendStartY = yOffset
                         for row in 0..<transitionHeight {
                             let alpha = CGFloat(row) / CGFloat(transitionHeight)
-                            let sliceRect = CGRect(x: 0, y: row, width: width, height: 1)
+                            let sliceRect = CGRect(x: 0, y: CGFloat(row), width: cgWidth, height: 1.0)
                             if let rowImg = frame.safeCropping(to: sliceRect) {
                                 ctx.saveGState()
                                 ctx.setAlpha(alpha)
-                                ctx.draw(rowImg, in: CGRect(x: 0, y: blendStartY + row, width: width, height: 1))
+                                ctx.draw(rowImg, in: CGRect(x: 0, y: blendStartY + CGFloat(row), width: cgWidth, height: 1.0))
                                 ctx.restoreGState()
                             }
                         }
@@ -168,9 +170,9 @@ public actor ImageStitchingEngine {
                     let newContentY = transitionHeight
                     let newContentHeight = effectiveContentHeight - newContentY
                     if newContentHeight > 0 {
-                        let contentRect = CGRect(x: 0, y: newContentY, width: width, height: newContentHeight)
+                        let contentRect = CGRect(x: 0, y: CGFloat(newContentY), width: cgWidth, height: CGFloat(newContentHeight))
                         if let newPart = frame.safeCropping(to: contentRect) {
-                            ctx.draw(newPart, in: CGRect(x: 0, y: yOffset + newContentY, width: width, height: newContentHeight))
+                            ctx.draw(newPart, in: CGRect(x: 0, y: yOffset + CGFloat(newContentY), width: cgWidth, height: CGFloat(newContentHeight)))
                         }
                     }
                 }
@@ -204,9 +206,13 @@ public actor ImageStitchingEngine {
         let width = Int(mainImage.size.width)
         let mainHeight = Int(mainImage.size.height)
         let totalHeight = fixedRegions.topHeight + mainHeight + fixedRegions.bottomHeight
+        let cgWidth = CGFloat(width)
+        let cgTopHeight = CGFloat(fixedRegions.topHeight)
+        let cgBottomHeight = CGFloat(fixedRegions.bottomHeight)
+        let cgMainHeight = CGFloat(mainHeight)
         
         let renderer = UIGraphicsImageRenderer(
-            size: CGSize(width: width, height: totalHeight),
+            size: CGSize(width: cgWidth, height: CGFloat(totalHeight)),
             format: {
                 let f = UIGraphicsImageRendererFormat()
                 f.scale = 1.0
@@ -220,20 +226,20 @@ public actor ImageStitchingEngine {
             
             // 1. Status bar
             if fixedRegions.topHeight > 0,
-               let top = sourceTop.safeCropping(to: CGRect(x: 0, y: 0, width: width, height: fixedRegions.topHeight)) {
-                ctx.draw(top, in: CGRect(x: 0, y: 0, width: width, height: fixedRegions.topHeight))
+               let top = sourceTop.safeCropping(to: CGRect(x: 0, y: 0, width: cgWidth, height: cgTopHeight)) {
+                ctx.draw(top, in: CGRect(x: 0, y: 0, width: cgWidth, height: cgTopHeight))
             }
             
             // 2. Main stitched content
             if let mainCG = mainImage.cgImage {
-                ctx.draw(mainCG, in: CGRect(x: 0, y: fixedRegions.topHeight, width: width, height: mainHeight))
+                ctx.draw(mainCG, in: CGRect(x: 0, y: cgTopHeight, width: cgWidth, height: cgMainHeight))
             }
             
             // 3. Bottom bar
             if fixedRegions.bottomHeight > 0 {
                 let bottomY = sourceBottom.height - fixedRegions.bottomHeight
-                if let bottom = sourceBottom.safeCropping(to: CGRect(x: 0, y: bottomY, width: width, height: fixedRegions.bottomHeight)) {
-                    ctx.draw(bottom, in: CGRect(x: 0, y: fixedRegions.topHeight + mainHeight, width: width, height: fixedRegions.bottomHeight))
+                if let bottom = sourceBottom.safeCropping(to: CGRect(x: 0, y: CGFloat(bottomY), width: cgWidth, height: cgBottomHeight)) {
+                    ctx.draw(bottom, in: CGRect(x: 0, y: cgTopHeight + cgMainHeight, width: cgWidth, height: cgBottomHeight))
                 }
             }
         }

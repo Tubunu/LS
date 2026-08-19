@@ -27,7 +27,7 @@ public actor ImageBlender {
         let totalHeight = image1.height + image2.height - overlapHeight
         guard totalHeight > 0 else { return nil }
         
-        let size = CGSize(width: width, height: totalHeight)
+        let size = CGSize(width: CGFloat(width), height: CGFloat(totalHeight))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1.0
         format.opaque = true
@@ -36,11 +36,12 @@ public actor ImageBlender {
         let image = renderer.image { context in
             let ctx = context.cgContext
             let nonOverlapTopHeight = max(0, image1.height - overlapHeight)
+            let cgWidth = CGFloat(width)
             
             // 1. Draw non-overlapping top portion of Image 1
             if nonOverlapTopHeight > 0,
-               let topPart = image1.safeCropping(to: CGRect(x: 0, y: 0, width: width, height: nonOverlapTopHeight)) {
-                ctx.draw(topPart, in: CGRect(x: 0, y: 0, width: width, height: nonOverlapTopHeight))
+               let topPart = image1.safeCropping(to: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(nonOverlapTopHeight))) {
+                ctx.draw(topPart, in: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(nonOverlapTopHeight)))
             }
             
             // 2. Blend the overlap transition zone
@@ -50,25 +51,25 @@ public actor ImageBlender {
             for row in 0..<blendHeight {
                 let alpha2 = CGFloat(row) / CGFloat(blendHeight)
                 let alpha1 = 1.0 - alpha2
-                let currentY = blendStartY + row
+                let currentY = CGFloat(blendStartY + row)
                 
                 // Draw slice from image1
                 let img1RowY = image1.height - overlapHeight + row
                 if img1RowY >= 0 && img1RowY < image1.height,
-                   let r1 = image1.safeCropping(to: CGRect(x: 0, y: img1RowY, width: width, height: 1)) {
+                   let r1 = image1.safeCropping(to: CGRect(x: 0, y: CGFloat(img1RowY), width: cgWidth, height: 1.0)) {
                     ctx.saveGState()
                     ctx.setAlpha(alpha1)
-                    ctx.draw(r1, in: CGRect(x: 0, y: currentY, width: width, height: 1))
+                    ctx.draw(r1, in: CGRect(x: 0, y: currentY, width: cgWidth, height: 1.0))
                     ctx.restoreGState()
                 }
                 
                 // Draw slice from image2
                 let img2RowY = row
                 if img2RowY >= 0 && img2RowY < image2.height,
-                   let r2 = image2.safeCropping(to: CGRect(x: 0, y: img2RowY, width: width, height: 1)) {
+                   let r2 = image2.safeCropping(to: CGRect(x: 0, y: CGFloat(img2RowY), width: cgWidth, height: 1.0)) {
                     ctx.saveGState()
                     ctx.setAlpha(alpha2)
-                    ctx.draw(r2, in: CGRect(x: 0, y: currentY, width: width, height: 1))
+                    ctx.draw(r2, in: CGRect(x: 0, y: currentY, width: cgWidth, height: 1.0))
                     ctx.restoreGState()
                 }
             }
@@ -76,15 +77,15 @@ public actor ImageBlender {
             // 3. Draw remaining overlap region from Image 2
             let remainingOverlapHeight = overlapHeight - blendHeight
             if remainingOverlapHeight > 0,
-               let midPart = image2.safeCropping(to: CGRect(x: 0, y: blendHeight, width: width, height: remainingOverlapHeight)) {
-                ctx.draw(midPart, in: CGRect(x: 0, y: blendStartY + blendHeight, width: width, height: remainingOverlapHeight))
+               let midPart = image2.safeCropping(to: CGRect(x: 0, y: CGFloat(blendHeight), width: cgWidth, height: CGFloat(remainingOverlapHeight))) {
+                ctx.draw(midPart, in: CGRect(x: 0, y: CGFloat(blendStartY + blendHeight), width: cgWidth, height: CGFloat(remainingOverlapHeight)))
             }
             
             // 4. Draw non-overlapping bottom portion of Image 2
             let bottomNonOverlapHeight = image2.height - overlapHeight
             if bottomNonOverlapHeight > 0,
-               let bottomPart = image2.safeCropping(to: CGRect(x: 0, y: overlapHeight, width: width, height: bottomNonOverlapHeight)) {
-                ctx.draw(bottomPart, in: CGRect(x: 0, y: nonOverlapTopHeight + overlapHeight, width: width, height: bottomNonOverlapHeight))
+               let bottomPart = image2.safeCropping(to: CGRect(x: 0, y: CGFloat(overlapHeight), width: cgWidth, height: CGFloat(bottomNonOverlapHeight))) {
+                ctx.draw(bottomPart, in: CGRect(x: 0, y: CGFloat(nonOverlapTopHeight + overlapHeight), width: cgWidth, height: CGFloat(bottomNonOverlapHeight)))
             }
         }
         

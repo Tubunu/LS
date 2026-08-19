@@ -1,0 +1,85 @@
+name: Build and Package iOS Release (IPA & TestFlight)
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: '是否尝试上传到 TestFlight (需配置 Apple Developer Secrets)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build_and_package:
+    name: Build & Export IPA
+    runs-on: macos-14
+    steps:
+      - name: 检出代码 (Checkout Code)
+        uses: actions/checkout@v4
+
+      - name: 配置 Xcode 环境 (Select Xcode)
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: 编译与生成 Release 归档 (xcodebuild archive)
+        run: |
+          xcodebuild archive \
+            -project LongScreenshot.xcodeproj \
+            -scheme LongScreenshot \
+            -destination 'generic/platform=iOS' \
+            -archivePath "build/LongScreenshot.xcarchive" \
+            -configuration Release \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: 打包为标准 iOS IPA 文件 (Package to IPA)
+        run: |
+          mkdir -p build/Payload
+          cp -r "build/LongScreenshot.xcarchive/Products/Applications/LongScreenshot.app" build/Payload/
+          cd build
+          zip -r LongScreenshot-Release.ipa Payload
+          cd ..
+          ls -lh build/LongScreenshot-Release.ipa
+
+      - name: 上传 IPA 安装包为 GitHub Artifacts (Upload IPA)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LongScreenshot-Release-IPA
+          path: build/LongScreenshot-Release.ipa
+          retention-days: 30
+
+      - name: 发布至 GitHub Release (仅在推送 Tag 时触发)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/LongScreenshot-Release.ipa
+          name: "正式版发布 ${{ github.ref_name }}"
+          body: |
+            ### 🚀 iPhone 长截图 App (LongScreenshot) 正式版
+            - ✨ Apple Music 流动极光视觉风格与 iOS 26 Liquid Glass 液态玻璃支持
+            - 📸 截图无痕拼接双模式 + 🎬 滚动录屏自动生成长图
+            - ☀️ 浅色明亮与 🌙 深色深邃双色彩主题
+
+            #### 📲 安装方法 (Windows 免 Mac):
+            1. 下载下方的 `LongScreenshot-Release.ipa`。
+            2. 使用 [Sideloadly](https://sideloadly.io/) 或 [AltStore](https://altstore.io/) 连接 iPhone，用你的 Apple ID 免费自签即可直接安装到真机！
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 部署至 TestFlight (可选，需配置证书秘钥)
+        if: ${{ inputs.upload_testflight == true && env.APPSTORE_PRIVATE_KEY != '' }}
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+        run: |
+          bundle install
+          bundle exec fastlane beta

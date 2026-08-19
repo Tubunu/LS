@@ -1,0 +1,21 @@
+workflows:
+  ios-build:
+    name: iOS Build & Test
+    environment:
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Build and Test App
+        script: |
+          xcodebuild build-for-testing \
+            -project LongScreenshot.xcodeproj \
+            -scheme LongScreenshot \
+            -destination 'platform=iOS Simulator,name=iPhone 15 Pro' \
+            CODE_SIGNING_ALLOWED=NO
+          
+          xcodebuild test-without-building \
+            -project LongScreenshot.xcodeproj \
+            -scheme LongScreenshot \
+            -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
+    artifacts:
+      - build/ios/ipa/*.ipa

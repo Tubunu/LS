@@ -1,0 +1,5 @@
+git_url(ENV["MATCH_GIT_URL"] || "git@github.com:your-account/certificates.git")
+storage_mode("git")
+type("appstore")
+app_identifier(["com.longscreenshot.app"])
+username(ENV["APPLE_ID"] || "developer@example.com")

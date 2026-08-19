@@ -279,13 +279,6 @@ public actor ImageStitchingEngine {
                 }
             }
         }
-                let bottomRect = CGRect(x: 0, y: CGFloat(bottomY), width: cgWidth, height: CGFloat(bottomCrop)).integral
-                if let bottomPart = lastFull.safeCropping(to: bottomRect) {
-                    let destY = CGFloat(totalCanvasHeight - bottomCrop)
-                    UIImage(cgImage: bottomPart).draw(in: CGRect(x: 0, y: destY, width: cgWidth, height: CGFloat(bottomCrop)))
-                }
-            }
-        }
         
         await progressHandler(0.98, "长截图生成完毕！")
         let targetScale: CGFloat

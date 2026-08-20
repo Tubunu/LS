@@ -209,7 +209,36 @@ public actor ImageStitchingEngine {
         let cgWidth = CGFloat(width)
         let cgEffectiveHeight = CGFloat(effectiveContentHeight)
         
-        // 1. Calculate slice steps from keyframe cumulative displacement
+        // 1. Compute pixel-accurate pair cuts between consecutive keyframes using OverlapDetector
+        struct KeyFrameCut {
+            let cutY1: Int // Cut in previous keyframe
+            let cutY2: Int // Continuing start in next keyframe
+        }
+        
+        var cuts: [KeyFrameCut] = []
+        let totalPairs = keyFrames.count - 1
+        
+        for i in 0..<totalPairs {
+            if Task.isCancelled { throw RecordingError.processingCancelled }
+            
+            let pairProgress = 0.86 + (Double(i) / Double(totalPairs)) * 0.04
+            await progressHandler(pairProgress, "正在像素级对齐关键帧（\(i + 1)/\(totalPairs)）...")
+            
+            let img1 = keyFrames[i].image
+            let img2 = keyFrames[i + 1].image
+            
+            if let overlap = await overlapDetector.findOverlap(bottomOf: img1, topOf: img2) {
+                cuts.append(KeyFrameCut(cutY1: overlap.refY, cutY2: overlap.matchY))
+            } else {
+                let frameDelta = keyFrames[i + 1].cumulativeOffset - keyFrames[i].cumulativeOffset
+                let step = max(10, min(Int(frameDelta), effectiveContentHeight))
+                let cut1 = topCrop + effectiveContentHeight
+                let cut2 = max(topCrop, cut1 - step)
+                cuts.append(KeyFrameCut(cutY1: cut1, cutY2: cut2))
+            }
+        }
+        
+        // 2. Build seamless slices from cuts
         struct VideoSlice {
             let frame: CGImage
             let srcRect: CGRect
@@ -220,34 +249,45 @@ public actor ImageStitchingEngine {
         var slices: [VideoSlice] = []
         var currentCanvasY: CGFloat = CGFloat(topCrop)
         
-        // First keyframe contributes the initial viewport body (omitting bottom toolbar)
-        let firstBodyRect = CGRect(x: 0, y: CGFloat(topCrop), width: cgWidth, height: cgEffectiveHeight)
+        // Keyframe 0: from topCrop down to cutY1 of first pair
+        let firstH = max(10, cuts[0].cutY1 - topCrop)
+        let firstRect = CGRect(x: 0, y: CGFloat(topCrop), width: cgWidth, height: CGFloat(firstH))
         slices.append(VideoSlice(
             frame: keyFrames[0].image,
-            srcRect: firstBodyRect,
+            srcRect: firstRect,
             destY: currentCanvasY,
-            height: cgEffectiveHeight
+            height: CGFloat(firstH)
         ))
-        currentCanvasY += cgEffectiveHeight
+        currentCanvasY += CGFloat(firstH)
         
-        // Subsequent keyframes contribute only their bottom newly-revealed content slices
-        for i in 1..<keyFrames.count {
-            let frameDelta = keyFrames[i].cumulativeOffset - keyFrames[i - 1].cumulativeOffset
-            let adjustedDelta = Int(frameDelta)
-            let step = max(0, min(adjustedDelta, effectiveContentHeight))
-            guard step > 0 else { continue }
-            
-            let sliceY = CGFloat(topCrop + effectiveContentHeight - step)
-            let sliceRect = CGRect(x: 0, y: sliceY, width: cgWidth, height: CGFloat(step)).integral
+        // Intermediate Keyframes: from cutY2 of previous pair to cutY1 of next pair
+        for i in 1..<totalPairs {
+            let startY = cuts[i - 1].cutY2
+            let endY = cuts[i].cutY1
+            let sliceH = max(10, endY - startY)
+            let srcRect = CGRect(x: 0, y: CGFloat(startY), width: cgWidth, height: CGFloat(sliceH))
             
             slices.append(VideoSlice(
                 frame: keyFrames[i].image,
-                srcRect: sliceRect,
+                srcRect: srcRect,
                 destY: currentCanvasY,
-                height: CGFloat(step)
+                height: CGFloat(sliceH)
             ))
-            currentCanvasY += CGFloat(step)
+            currentCanvasY += CGFloat(sliceH)
         }
+        
+        // Last Keyframe: from cutY2 of last pair to height - bottomCrop
+        let lastIndex = keyFrames.count - 1
+        let lastStartY = cuts[lastIndex - 1].cutY2
+        let lastH = max(10, (height - bottomCrop) - lastStartY)
+        let lastRect = CGRect(x: 0, y: CGFloat(lastStartY), width: cgWidth, height: CGFloat(lastH))
+        slices.append(VideoSlice(
+            frame: keyFrames[lastIndex].image,
+            srcRect: lastRect,
+            destY: currentCanvasY,
+            height: CGFloat(lastH)
+        ))
+        currentCanvasY += CGFloat(lastH)
         
         let totalCanvasHeight = Int(currentCanvasY) + bottomCrop
         guard totalCanvasHeight <= 32768 else {
@@ -256,58 +296,33 @@ public actor ImageStitchingEngine {
         
         if Task.isCancelled { throw RecordingError.processingCancelled }
         
-        await progressHandler(0.90, "正在合成长截图画布（\(width)×\(totalCanvasHeight)px）...")
+        await progressHandler(0.92, "正在合成无缝长截图画布（\(width)×\(totalCanvasHeight)px）...")
         
-        // 2. Render directly in a single pass (Top Fixed UI + Sequential Slices + Bottom Fixed UI)
+        // 3. Render directly in a single pass (Top Fixed UI + Sequential Slices + Bottom Fixed UI)
         let canvasSize = CGSize(width: cgWidth, height: CGFloat(totalCanvasHeight))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1.0
         format.opaque = true
         
         let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
-        let stitchedImage = renderer.image { context in
-            let ctx = context.cgContext
-            
-            // 2.1 Draw Status Bar & Header once from first frame
+        let stitchedImage = renderer.image { _ in
+            // 3.1 Draw Status Bar & Header once from first frame
             if topCrop > 0, let firstFull = keyFrames.first?.image,
                let topPart = firstFull.safeCropping(to: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop))) {
                 UIImage(cgImage: topPart).draw(in: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop)))
             }
             
-            // 2.2 Draw Sequential Body Slices with smooth seam blending
-            for (index, slice) in slices.enumerated() {
+            // 3.2 Draw Sequential Body Slices (each slice meets the next at the exact matching pixel)
+            for slice in slices {
                 autoreleasepool {
-                    guard let cropped = slice.frame.safeCropping(to: slice.srcRect) else { return }
-                    let sliceH = slice.srcRect.height
-                    
-                    if index == 0 {
-                        UIImage(cgImage: cropped).draw(in: CGRect(x: 0, y: slice.destY, width: cgWidth, height: sliceH))
-                    } else {
-                        let blendBand = min(12, Int(sliceH / 4))
-                        if blendBand > 0 {
-                            self.drawBlendedSlice(
-                                ctx: ctx,
-                                frame: cropped,
-                                blendStartY: slice.destY,
-                                transitionHeight: blendBand,
-                                cgWidth: cgWidth
-                            )
-                            let newContentY = CGFloat(blendBand)
-                            let newContentH = sliceH - newContentY
-                            if newContentH > 0 {
-                                let newRect = CGRect(x: 0, y: newContentY, width: cgWidth, height: newContentH).integral
-                                if let newPart = cropped.safeCropping(to: newRect) {
-                                    UIImage(cgImage: newPart).draw(in: CGRect(x: 0, y: slice.destY + newContentY, width: cgWidth, height: newContentH + 1.0))
-                                }
-                            }
-                        } else {
-                            UIImage(cgImage: cropped).draw(in: CGRect(x: 0, y: slice.destY, width: cgWidth, height: sliceH + 1.0))
-                        }
+                    if let cropped = slice.frame.safeCropping(to: slice.srcRect) {
+                        let renderRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height + 1.0)
+                        UIImage(cgImage: cropped).draw(in: renderRect)
                     }
                 }
             }
             
-            // 2.3 Draw Bottom Bar once from last frame
+            // 3.3 Draw Bottom Bar once from last frame
             if bottomCrop > 0, let lastFull = keyFrames.last?.image {
                 let bottomY = lastFull.height - bottomCrop
                 let bottomRect = CGRect(x: 0, y: CGFloat(bottomY), width: cgWidth, height: CGFloat(bottomCrop)).integral

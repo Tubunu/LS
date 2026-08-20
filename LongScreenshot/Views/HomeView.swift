@@ -49,31 +49,15 @@ public struct HomeView: View {
                         .padding(.top, 16)
                         .padding(.horizontal, 20)
                         
-                        // Dual hero mode cards
+                        // Mode cards
                         VStack(spacing: 16) {
-                            // Mode 1: Screenshot Stitching
-                            NavigationLink(value: HomeAppMode.screenshot) {
-                                ModeCard(
-                                    modeNumber: "MODE 01",
-                                    icon: "photo.on.rectangle.angled",
-                                    title: "截图无痕拼接",
-                                    subtitle: "从相册挑选多张重叠截图，Accelerate 算法毫秒级定位重叠接缝并无缝融合。",
-                                    actionText: "开始拼接",
-                                    gradientColors: [
-                                        Color(red: 0.35, green: 0.34, blue: 0.84),
-                                        Color(red: 0.66, green: 0.13, blue: 0.84)
-                                    ]
-                                )
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            // Mode 2: Screen Recording to Long Image
+                            // Mode 2: Screen Recording to Long Image (Primary)
                             NavigationLink(value: HomeAppMode.recording) {
                                 ModeCard(
-                                    modeNumber: "MODE 02",
+                                    modeNumber: "MODE PRO",
                                     icon: "record.circle",
                                     title: "录屏智能转长图",
-                                    subtitle: "选择滚动录屏视频，Vision 帧间位移检测，自动剔除静止/抖动帧并直接生成长图。",
+                                    subtitle: "选择滚动录屏视频，Vision 与 Accelerate 双引擎像素级对齐，自动剔除静止/悬浮栏并生成超清长图。",
                                     actionText: "选择录屏",
                                     gradientColors: [
                                         Color(red: 0.98, green: 0.14, blue: 0.24),

@@ -212,6 +212,9 @@ public struct RecordingPickerView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: videoURL)
+        .onDisappear {
+            loadTask?.cancel()
+        }
     }
     
     private func tipRow(number: String, text: String) -> some View {

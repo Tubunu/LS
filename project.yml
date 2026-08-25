@@ -1,6 +1,6 @@
 name: LongScreenshot
 options:
-  bundleIdPrefix: com.tubunu
+  bundleIdPrefix: com.longscreenshot
   deploymentTarget:
     iOS: "17.0"
   xcodeVersion: "15.0"
@@ -23,7 +23,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: "LongScreenshot"
-        PRODUCT_BUNDLE_IDENTIFIER: com.tubunu.LongScreenshot
+        PRODUCT_BUNDLE_IDENTIFIER: com.longscreenshot.app
         INFOPLIST_FILE: LongScreenshot/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -45,7 +45,7 @@ targets:
       - target: LongScreenshot
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tubunu.LongScreenshotTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.longscreenshot.app.LongScreenshotTests
         SWIFT_VERSION: "5.9"
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LongScreenshot.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LongScreenshot"

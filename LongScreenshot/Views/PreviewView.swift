@@ -40,13 +40,13 @@ public struct PreviewView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 10)
                             .gesture(
-                                MagnificationGesture()
+                                MagnifyGesture()
                                     .onChanged { value in
-                                        pinchScale = value
+                                        pinchScale = value.magnification
                                     }
                                     .onEnded { value in
                                         withAnimation(.spring(duration: 0.25)) {
-                                            baseScale = max(1.0, min(baseScale * value, 5.0))
+                                            baseScale = max(1.0, min(baseScale * value.magnification, 5.0))
                                             pinchScale = 1.0
                                         }
                                     }

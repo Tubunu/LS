@@ -8,29 +8,21 @@ on:
 jobs:
   deploy_testflight:
     runs-on: macos-14
+    if: ${{ secrets.APPSTORE_KEY_ID != '' && secrets.APPSTORE_PRIVATE_KEY != '' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Check Secrets & Setup Ruby
-        if: ${{ env.APPSTORE_KEY_ID != '' && env.APPSTORE_PRIVATE_KEY != '' }}
+      - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
           bundler-cache: true
-        env:
-          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
       - name: Install Dependencies
-        if: ${{ env.APPSTORE_KEY_ID != '' && env.APPSTORE_PRIVATE_KEY != '' }}
         run: bundle install
-        env:
-          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
       - name: Deploy via Fastlane
-        if: ${{ env.APPSTORE_KEY_ID != '' && env.APPSTORE_PRIVATE_KEY != '' }}
         env:
           APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}

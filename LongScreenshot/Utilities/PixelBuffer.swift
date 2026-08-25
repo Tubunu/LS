@@ -25,7 +25,7 @@ public enum PixelBuffer {
         let totalPixels = width * height
         guard totalPixels > 0 else { return [] }
         
-        guard let grayColorSpace = CGColorSpace(name: CGColorSpace.linearGray) ?? CGColorSpace(name: CGColorSpace.genericGrayGamma2_2) else {
+        guard let grayColorSpace = CGColorSpace(name: CGColorSpace.genericGrayGamma2_2) ?? CGColorSpaceCreateDeviceGray() else {
             return []
         }
         

@@ -146,7 +146,7 @@ public actor ImageStitchingEngine {
             for slice in slices {
                 autoreleasepool {
                     if let cropped = slice.image.safeCropping(to: slice.srcRect) {
-                        let drawRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height + 1.0)
+                        let drawRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height)
                         UIImage(cgImage: cropped).draw(in: drawRect)
                     }
                 }
@@ -309,7 +309,7 @@ public actor ImageStitchingEngine {
             for slice in slices {
                 autoreleasepool {
                     if let cropped = slice.frame.safeCropping(to: slice.srcRect) {
-                        let renderRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height + 1.0)
+                        let renderRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height)
                         UIImage(cgImage: cropped).draw(in: renderRect)
                     }
                 }

@@ -16,7 +16,10 @@ public struct ShareSheet: UIViewControllerRepresentable {
         controller.excludedActivityTypes = excludedActivityTypes
         if let popover = controller.popoverPresentationController {
             popover.sourceView = controller.view
-            popover.sourceRect = CGRect(x: controller.view.bounds.midX, y: controller.view.bounds.midY, width: 0, height: 0)
+            let bounds = controller.view.bounds
+            let midX = bounds.width > 0 ? bounds.midX : UIScreen.main.bounds.midX
+            let midY = bounds.height > 0 ? bounds.midY : UIScreen.main.bounds.midY
+            popover.sourceRect = CGRect(x: midX, y: midY, width: 0, height: 0)
             popover.permittedArrowDirections = []
         }
         return controller

@@ -43,16 +43,13 @@ public actor ImageStitchingEngine {
         }
         
         let baselineScale: CGFloat = (width >= 1000 ? 3.0 : (width >= 640 ? 2.0 : 1.0))
-        let topHeaderHeight = Int((105.0 * baselineScale).rounded())
-        let bottomFooterHeight = Int((85.0 * baselineScale).rounded())
+        let adaptive = CropConfig.adaptive(for: CGSize(width: width, height: height))
+        let topHeaderHeight = Int((adaptive.statusBarHeight * baselineScale).rounded())
+        let bottomFooterHeight = Int((adaptive.bottomSafeArea * baselineScale).rounded())
+        let effectiveContentHeight = max(20, height - topHeaderHeight - bottomFooterHeight)
         
-        // 2. Sequentially find overlap cut points between adjacent pairs
-        struct PairCut {
-            let cutY1: Int // Cut point in previous image (img1)
-            let cutY2: Int // Continuing point in next image (img2)
-        }
-        
-        var pairCuts: [PairCut] = []
+        // 2. Sequentially find displacements between adjacent screenshot pairs
+        var displacements: [Int] = []
         for i in 0..<(totalCount - 1) {
             if Task.isCancelled { throw RecordingError.processingCancelled }
             
@@ -63,18 +60,18 @@ public actor ImageStitchingEngine {
             let img2 = cgImages[i + 1]
             
             if let overlap = await overlapDetector.findOverlap(bottomOf: img1, topOf: img2) {
-                pairCuts.append(PairCut(cutY1: overlap.refY, cutY2: overlap.matchY))
+                let deltaY = overlap.refY - overlap.matchY
+                let validDelta = max(10, min(deltaY, effectiveContentHeight))
+                displacements.append(validDelta)
             } else {
                 AppLogger.stitching.warning("Failed to find strong overlap between image \(i) and \(i + 1). Using default safe cut.")
-                let defaultCutY1 = max(topHeaderHeight + 50, height - bottomFooterHeight)
-                let defaultCutY2 = min(height - bottomFooterHeight - 50, topHeaderHeight)
-                pairCuts.append(PairCut(cutY1: defaultCutY1, cutY2: defaultCutY2))
+                displacements.append(effectiveContentHeight)
             }
         }
         
         if Task.isCancelled { throw RecordingError.processingCancelled }
         
-        // 3. Compute seamless slices
+        // 3. Compute seamless slices using Consistent Cumulative Displacement Geometry
         struct ImageSlice {
             let image: CGImage
             let srcRect: CGRect
@@ -84,9 +81,10 @@ public actor ImageStitchingEngine {
         
         var slices: [ImageSlice] = []
         var currentCanvasY: CGFloat = 0
+        let anchorCutY = height - bottomFooterHeight
         
-        // Image 0: Top Header + Body up to cutY1 of first pair
-        let firstSliceHeight = max(10, pairCuts[0].cutY1)
+        // Image 0: From 0 down to anchorCutY
+        let firstSliceHeight = anchorCutY
         let firstRect = CGRect(x: 0, y: 0, width: width, height: firstSliceHeight)
         slices.append(ImageSlice(
             image: cgImages[0],
@@ -96,11 +94,11 @@ public actor ImageStitchingEngine {
         ))
         currentCanvasY += CGFloat(firstSliceHeight)
         
-        // Middle Images: From cutY2 of previous pair to cutY1 of next pair
+        // Middle Images: Slices with height = displacements[i - 1] starting at (anchorCutY - displacements[i - 1])
         for i in 1..<(totalCount - 1) {
-            let startY = pairCuts[i - 1].cutY2
-            let endY = pairCuts[i].cutY1
-            let sliceH = max(10, endY - startY)
+            let delta = displacements[i - 1]
+            let startY = max(0, anchorCutY - delta)
+            let sliceH = max(1, delta)
             let srcRect = CGRect(x: 0, y: startY, width: width, height: sliceH)
             
             slices.append(ImageSlice(
@@ -112,10 +110,11 @@ public actor ImageStitchingEngine {
             currentCanvasY += CGFloat(sliceH)
         }
         
-        // Last Image: From cutY2 of last pair to bottom of image
+        // Last Image: From (anchorCutY - displacements.last) to height
         let lastIndex = totalCount - 1
-        let lastStartY = pairCuts[lastIndex - 1].cutY2
-        let lastSliceH = max(10, height - lastStartY)
+        let lastDelta = displacements[lastIndex - 1]
+        let lastStartY = max(0, anchorCutY - lastDelta)
+        let lastSliceH = max(1, height - lastStartY)
         let lastRect = CGRect(x: 0, y: lastStartY, width: width, height: lastSliceH)
         slices.append(ImageSlice(
             image: cgImages[lastIndex],
@@ -157,17 +156,9 @@ public actor ImageStitchingEngine {
         if Task.isCancelled { throw RecordingError.processingCancelled }
         
         await progressHandler(0.98, "截图拼接完成！")
-        let targetScale: CGFloat
-        if width >= 1000 {
-            targetScale = 3.0
-        } else if width >= 640 {
-            targetScale = 2.0
-        } else {
-            targetScale = 1.0
-        }
         
         if let cgResult = stitchedImage.cgImage {
-            return UIImage(cgImage: cgResult, scale: targetScale, orientation: .up)
+            return UIImage(cgImage: cgResult, scale: baselineScale, orientation: .up)
         } else {
             return stitchedImage
         }
@@ -200,45 +191,45 @@ public actor ImageStitchingEngine {
         let height = keyFrames[0].image.height
         let baselineScale: CGFloat = (width >= 1000 ? 3.0 : (width >= 640 ? 2.0 : 1.0))
         
-        let minTopCrop = Int((105.0 * baselineScale).rounded())
-        let minBottomCrop = Int((85.0 * baselineScale).rounded())
+        let adaptive = CropConfig.adaptive(for: CGSize(width: width, height: height))
+        let adaptiveTop = Int((adaptive.statusBarHeight * baselineScale).rounded())
+        let adaptiveBottom = Int((adaptive.bottomSafeArea * baselineScale).rounded())
         
-        let topCrop = max(fixedRegions.topHeight, minTopCrop)
-        let bottomCrop = max(fixedRegions.bottomHeight, minBottomCrop)
-        let effectiveContentHeight = max(10, height - topCrop - bottomCrop)
+        let topCrop = max(fixedRegions.topHeight, adaptiveTop)
+        let bottomCrop = max(fixedRegions.bottomHeight, adaptiveBottom)
+        
+        let contentTop = topCrop
+        let contentBottom = max(contentTop + 20, height - bottomCrop)
+        let effectiveContentHeight = contentBottom - contentTop
         let cgWidth = CGFloat(width)
-        let cgEffectiveHeight = CGFloat(effectiveContentHeight)
         
-        // 1. Compute pixel-accurate pair cuts between consecutive keyframes using OverlapDetector
-        struct KeyFrameCut {
-            let cutY1: Int // Cut in previous keyframe
-            let cutY2: Int // Continuing start in next keyframe
-        }
-        
-        var cuts: [KeyFrameCut] = []
+        // 1. Compute pixel-accurate displacement between consecutive keyframes
+        var displacements: [Int] = []
         let totalPairs = keyFrames.count - 1
         
         for i in 0..<totalPairs {
             if Task.isCancelled { throw RecordingError.processingCancelled }
             
-            let pairProgress = 0.86 + (Double(i) / Double(totalPairs)) * 0.04
+            let pairProgress = 0.86 + (Double(i) / Double(totalPairs)) * 0.05
             await progressHandler(pairProgress, "正在像素级对齐关键帧（\(i + 1)/\(totalPairs)）...")
             
             let img1 = keyFrames[i].image
             let img2 = keyFrames[i + 1].image
+            let expectedDelta = keyFrames[i + 1].cumulativeOffset - keyFrames[i].cumulativeOffset
             
-            if let overlap = await overlapDetector.findOverlap(bottomOf: img1, topOf: img2) {
-                cuts.append(KeyFrameCut(cutY1: overlap.refY, cutY2: overlap.matchY))
-            } else {
-                let frameDelta = keyFrames[i + 1].cumulativeOffset - keyFrames[i].cumulativeOffset
-                let step = max(10, min(Int(frameDelta), effectiveContentHeight))
-                let cut1 = topCrop + effectiveContentHeight
-                let cut2 = max(topCrop, cut1 - step)
-                cuts.append(KeyFrameCut(cutY1: cut1, cutY2: cut2))
-            }
+            let (deltaY, _) = await overlapDetector.findRefinedDisplacement(
+                from: img1,
+                to: img2,
+                expectedDeltaY: expectedDelta,
+                topCrop: topCrop,
+                bottomCrop: bottomCrop
+            )
+            
+            let validDelta = max(1, min(deltaY, effectiveContentHeight - 5))
+            displacements.append(validDelta)
         }
         
-        // 2. Build seamless slices from cuts
+        // 2. Build seamless slices using Consistent Cumulative Displacement Geometry
         struct VideoSlice {
             let frame: CGImage
             let srcRect: CGRect
@@ -248,10 +239,11 @@ public actor ImageStitchingEngine {
         
         var slices: [VideoSlice] = []
         var currentCanvasY: CGFloat = CGFloat(topCrop)
+        let anchorCutY = contentBottom
         
-        // Keyframe 0: from topCrop down to cutY1 of first pair
-        let firstH = max(10, cuts[0].cutY1 - topCrop)
-        let firstRect = CGRect(x: 0, y: CGFloat(topCrop), width: cgWidth, height: CGFloat(firstH))
+        // Keyframe 0: From contentTop down to anchorCutY
+        let firstH = anchorCutY - contentTop
+        let firstRect = CGRect(x: 0, y: CGFloat(contentTop), width: cgWidth, height: CGFloat(firstH))
         slices.append(VideoSlice(
             frame: keyFrames[0].image,
             srcRect: firstRect,
@@ -260,11 +252,11 @@ public actor ImageStitchingEngine {
         ))
         currentCanvasY += CGFloat(firstH)
         
-        // Intermediate Keyframes: from cutY2 of previous pair to cutY1 of next pair
+        // Intermediate Keyframes: Slices of height = displacements[i - 1] starting at (anchorCutY - displacements[i - 1])
         for i in 1..<totalPairs {
-            let startY = cuts[i - 1].cutY2
-            let endY = cuts[i].cutY1
-            let sliceH = max(10, endY - startY)
+            let delta = displacements[i - 1]
+            let startY = anchorCutY - delta
+            let sliceH = delta
             let srcRect = CGRect(x: 0, y: CGFloat(startY), width: cgWidth, height: CGFloat(sliceH))
             
             slices.append(VideoSlice(
@@ -276,10 +268,11 @@ public actor ImageStitchingEngine {
             currentCanvasY += CGFloat(sliceH)
         }
         
-        // Last Keyframe: from cutY2 of last pair to height - bottomCrop
+        // Last Keyframe: From (anchorCutY - displacements.last) to contentBottom
         let lastIndex = keyFrames.count - 1
-        let lastStartY = cuts[lastIndex - 1].cutY2
-        let lastH = max(10, (height - bottomCrop) - lastStartY)
+        let lastDelta = displacements[lastIndex - 1]
+        let lastStartY = anchorCutY - lastDelta
+        let lastH = contentBottom - lastStartY
         let lastRect = CGRect(x: 0, y: CGFloat(lastStartY), width: cgWidth, height: CGFloat(lastH))
         slices.append(VideoSlice(
             frame: keyFrames[lastIndex].image,
@@ -298,7 +291,7 @@ public actor ImageStitchingEngine {
         
         await progressHandler(0.92, "正在合成无缝长截图画布（\(width)×\(totalCanvasHeight)px）...")
         
-        // 3. Render directly in a single pass (Top Fixed UI + Sequential Slices + Bottom Fixed UI)
+        // 3. Single-pass high-efficiency rendering (Top Fixed UI + Sequential Content Slices + Bottom Fixed UI)
         let canvasSize = CGSize(width: cgWidth, height: CGFloat(totalCanvasHeight))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1.0
@@ -312,7 +305,7 @@ public actor ImageStitchingEngine {
                 UIImage(cgImage: topPart).draw(in: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop)))
             }
             
-            // 3.2 Draw Sequential Body Slices (each slice meets the next at the exact matching pixel)
+            // 3.2 Draw Sequential Body Slices (each slice meets the next with mathematical single-pixel precision)
             for slice in slices {
                 autoreleasepool {
                     if let cropped = slice.frame.safeCropping(to: slice.srcRect) {
@@ -334,57 +327,15 @@ public actor ImageStitchingEngine {
         }
         
         await progressHandler(0.98, "长截图生成完毕！")
-        let targetScale: CGFloat
-        if width >= 1000 {
-            targetScale = 3.0
-        } else if width >= 640 {
-            targetScale = 2.0
-        } else {
-            targetScale = 1.0
-        }
         
         let finalImage: UIImage
         if let cgResult = stitchedImage.cgImage {
-            finalImage = UIImage(cgImage: cgResult, scale: targetScale, orientation: .up)
+            finalImage = UIImage(cgImage: cgResult, scale: baselineScale, orientation: .up)
         } else {
             finalImage = stitchedImage
         }
         
         await progressHandler(1.0, "长截图生成完毕！")
         return finalImage
-    }
-    
-    // MARK: - Helper Methods
-    
-    /// Renders an alpha-blended transition strip for overlapping adjacent images
-    private func drawBlendedSlice(
-        ctx: CGContext,
-        frame: CGImage,
-        blendStartY: CGFloat,
-        transitionHeight: Int,
-        cgWidth: CGFloat
-    ) {
-        guard transitionHeight > 0 else { return }
-        let steps = min(transitionHeight, 20)
-        
-        for step in 0..<steps {
-            autoreleasepool {
-                let startY = (CGFloat(step) * CGFloat(transitionHeight) / CGFloat(steps)).rounded()
-                let endY = (CGFloat(step + 1) * CGFloat(transitionHeight) / CGFloat(steps)).rounded()
-                let sliceHeight = endY - startY
-                guard sliceHeight > 0 else { return }
-                
-                let alpha = CGFloat(step + 1) / CGFloat(steps + 1)
-                let destY = blendStartY + startY
-                
-                let sliceRect = CGRect(x: 0, y: startY, width: cgWidth, height: sliceHeight).integral
-                if let slice = frame.safeCropping(to: sliceRect) {
-                    ctx.saveGState()
-                    ctx.setAlpha(alpha)
-                    UIImage(cgImage: slice).draw(in: CGRect(x: 0, y: destY, width: cgWidth, height: sliceHeight))
-                    ctx.restoreGState()
-                }
-            }
-        }
     }
 }

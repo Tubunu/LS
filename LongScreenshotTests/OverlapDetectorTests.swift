@@ -51,4 +51,30 @@ final class OverlapDetectorTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(result.confidence, 0.70, "Confidence should be high for exact pattern")
         }
     }
+    
+    func testRefinedDisplacement() async {
+        let detector = OverlapDetector()
+        let width = 300
+        let fullHeight = 600
+        let trueDisplacement = 130
+        
+        let fullImage = createTestImage(width: width, height: fullHeight, startPattern: 42)
+        
+        // Frame 1 is top 400px
+        let image1 = fullImage.safeCropping(to: CGRect(x: 0, y: 0, width: width, height: 400))!
+        // Frame 2 is shifted down by 130px
+        let image2 = fullImage.safeCropping(to: CGRect(x: 0, y: trueDisplacement, width: width, height: 400))!
+        
+        let (deltaY, confidence) = await detector.findRefinedDisplacement(
+            from: image1,
+            to: image2,
+            expectedDeltaY: 125.0, // Slight tracking error of 5px
+            topCrop: 40,
+            bottomCrop: 30,
+            referenceStripHeight: 80
+        )
+        
+        XCTAssertEqual(deltaY, trueDisplacement, "Should refine displacement to exact pixel: \(trueDisplacement)")
+        XCTAssertGreaterThanOrEqual(confidence, 0.75, "Confidence should be high for refined displacement")
+    }
 }

@@ -198,7 +198,9 @@ public struct RecordingPickerView: View {
                 ProcessingView(mode: .recording(url), onComplete: { result in
                     processedResultImage = result
                     isProcessing = false
-                    navigateToPreview = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        navigateToPreview = true
+                    }
                 }, onCancel: {
                     isProcessing = false
                 })

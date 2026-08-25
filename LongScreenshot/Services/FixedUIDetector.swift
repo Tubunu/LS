@@ -50,8 +50,8 @@ public actor FixedUIDetector {
         }
         let sampledFrames = indices.map { keyFrames[$0] }
         
-        let maxTopCheck = min(Int(totalDisplacement * 0.7), min(height / 3, 550))
-        let maxBottomCheck = min(height / 3, 500)
+        let maxTopCheck = min(height / 3, max(baselineTop + 20, Int(totalDisplacement * 0.85)))
+        let maxBottomCheck = min(height / 3, max(baselineBottom + 20, Int(totalDisplacement * 0.85)))
         
         var rowDiffBuffer = [Float](repeating: 0, count: width)
         var topFixed = baselineTop
@@ -74,7 +74,7 @@ public actor FixedUIDetector {
                         consecutiveMismatchesTop = 0
                     } else {
                         consecutiveMismatchesTop += 1
-                        if consecutiveMismatchesTop > 35 {
+                        if consecutiveMismatchesTop > 12 {
                             break
                         }
                     }
@@ -99,7 +99,7 @@ public actor FixedUIDetector {
                         consecutiveMismatchesBottom = 0
                     } else {
                         consecutiveMismatchesBottom += 1
-                        if consecutiveMismatchesBottom > 35 {
+                        if consecutiveMismatchesBottom > 12 {
                             break
                         }
                     }

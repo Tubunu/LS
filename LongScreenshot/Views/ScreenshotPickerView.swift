@@ -208,7 +208,9 @@ public struct ScreenshotPickerView: View {
             ProcessingView(mode: .screenshot(viewModel.selectedImages), onComplete: { result in
                 processedResultImage = result
                 isProcessing = false
-                navigateToPreview = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    navigateToPreview = true
+                }
             }, onCancel: {
                 isProcessing = false
             })

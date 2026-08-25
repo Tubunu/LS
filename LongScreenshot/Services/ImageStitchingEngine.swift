@@ -204,8 +204,14 @@ public actor ImageStitchingEngine {
         let cgWidth = CGFloat(width)
         
         // 1. Compute pixel-accurate displacement between consecutive keyframes
+        //    using full-image overlap search (same proven approach as screenshot mode).
+        //    This avoids the accumulated Vision tracking error from low-res frames that
+        //    causes false SAD matches on repetitive social-media feed content.
         var displacements: [Int] = []
         let totalPairs = keyFrames.count - 1
+        
+        // Pre-crop all keyframes to content area to exclude fixed UI from overlap matching
+        let contentRect = CGRect(x: 0, y: CGFloat(contentTop), width: cgWidth, height: CGFloat(effectiveContentHeight))
         
         for i in 0..<totalPairs {
             if Task.isCancelled { throw RecordingError.processingCancelled }
@@ -215,18 +221,28 @@ public actor ImageStitchingEngine {
             
             let img1 = keyFrames[i].image
             let img2 = keyFrames[i + 1].image
-            let expectedDelta = keyFrames[i + 1].cumulativeOffset - keyFrames[i].cumulativeOffset
             
-            let (deltaY, _) = await overlapDetector.findRefinedDisplacement(
-                from: img1,
-                to: img2,
-                expectedDeltaY: expectedDelta,
-                topCrop: topCrop,
-                bottomCrop: bottomCrop
-            )
+            // Crop to content area so fixed status bar / bottom bar don't interfere with matching
+            let croppedImg1 = img1.safeCropping(to: contentRect) ?? img1
+            let croppedImg2 = img2.safeCropping(to: contentRect) ?? img2
             
-            let validDelta = max(1, min(deltaY, effectiveContentHeight - 5))
-            displacements.append(validDelta)
+            // Full-image overlap search — no reliance on accumulated Vision prior
+            if let overlap = await overlapDetector.findOverlap(
+                bottomOf: croppedImg1,
+                topOf: croppedImg2,
+                referenceStripHeight: 200
+            ) {
+                let deltaY = overlap.refY - overlap.matchY
+                let validDelta = max(1, min(deltaY, effectiveContentHeight - 5))
+                displacements.append(validDelta)
+                AppLogger.stitching.info("Recording overlap: keyframe \(i)→\(i+1) deltaY=\(validDelta), confidence=\(overlap.confidence)")
+            } else {
+                // Fallback: use the accumulated Vision tracking prior (less accurate but better than nothing)
+                let expectedDelta = keyFrames[i + 1].cumulativeOffset - keyFrames[i].cumulativeOffset
+                let fallbackDelta = max(1, min(Int(expectedDelta.rounded()), effectiveContentHeight - 5))
+                displacements.append(fallbackDelta)
+                AppLogger.stitching.warning("Recording overlap detection failed between keyframe \(i) and \(i+1), using Vision prior: \(fallbackDelta)")
+            }
         }
         
         // 2. Build seamless slices using Consistent Cumulative Displacement Geometry
@@ -243,7 +259,7 @@ public actor ImageStitchingEngine {
         
         // Keyframe 0: From contentTop down to anchorCutY
         let firstH = anchorCutY - contentTop
-        let firstRect = CGRect(x: 0, y: CGFloat(contentTop), width: cgWidth, height: CGFloat(firstH))
+        let firstRect = CGRect(x: 0, y: CGFloat(contentTop), width: cgWidth, height: CGFloat(firstH)).integral
         slices.append(VideoSlice(
             frame: keyFrames[0].image,
             srcRect: firstRect,
@@ -257,7 +273,7 @@ public actor ImageStitchingEngine {
             let delta = displacements[i - 1]
             let startY = anchorCutY - delta
             let sliceH = delta
-            let srcRect = CGRect(x: 0, y: CGFloat(startY), width: cgWidth, height: CGFloat(sliceH))
+            let srcRect = CGRect(x: 0, y: CGFloat(startY), width: cgWidth, height: CGFloat(sliceH)).integral
             
             slices.append(VideoSlice(
                 frame: keyFrames[i].image,
@@ -273,7 +289,7 @@ public actor ImageStitchingEngine {
         let lastDelta = displacements[lastIndex - 1]
         let lastStartY = anchorCutY - lastDelta
         let lastH = contentBottom - lastStartY
-        let lastRect = CGRect(x: 0, y: CGFloat(lastStartY), width: cgWidth, height: CGFloat(lastH))
+        let lastRect = CGRect(x: 0, y: CGFloat(lastStartY), width: cgWidth, height: CGFloat(lastH)).integral
         slices.append(VideoSlice(
             frame: keyFrames[lastIndex].image,
             srcRect: lastRect,
@@ -305,7 +321,7 @@ public actor ImageStitchingEngine {
                 UIImage(cgImage: topPart).draw(in: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop)))
             }
             
-            // 3.2 Draw Sequential Body Slices (each slice meets the next with mathematical single-pixel precision)
+            // 3.2 Draw Sequential Body Slices with pixel-precise alignment
             for slice in slices {
                 autoreleasepool {
                     if let cropped = slice.frame.safeCropping(to: slice.srcRect) {

@@ -30,6 +30,8 @@ jobs:
     name: Build & Package IPA
     runs-on: macos-14
     timeout-minutes: 30
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
@@ -37,12 +39,12 @@ jobs:
 
       - name: Select Xcode Version
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true
           xcodebuild -version
 
       - name: Install XcodeGen
         run: |
-          brew install xcodegen
+          brew install xcodegen || true
 
       - name: Generate Xcode Project
         run: |
@@ -50,7 +52,8 @@ jobs:
 
       - name: Set App Version & Build Number
         run: |
-          VERSION="${{ github.event.inputs.version_name || '2.0.0' }}"
+          VERSION="${{ github.event.inputs.version_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '2.3.2' }}"
+          VERSION="${VERSION#v}"
           BUILD_NUM="${{ github.event.inputs.build_number || github.run_number }}"
           echo "Setting Version: $VERSION, Build: $BUILD_NUM"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" LongScreenshot/Resources/Info.plist || true
@@ -104,6 +107,16 @@ jobs:
         with:
           files: output/LongScreenshot_Release.ipa
           name: "长截图 LongScreenshot v${{ github.event.inputs.version_name || github.ref_name }}"
+          body: |
+            ### 🚀 iPhone 长截图 App (LongScreenshot) 正式版
+            - 修复录屏长截图模式中底部悬浮操作栏（如“说点什么吧...”输入框与互动按钮）被重复拼接的问题
+            - 升级固定区域智能识别算法，支持毛玻璃与半透明背景悬浮栏的精准检测
+            - 📸 截图无痕拼接 + 🎬 滚动录屏自动生成高清长图
+            - ☀️ 浅色明亮与 🌙 深色深邃双色彩主题
+
+            #### 📲 安装方法:
+            1. 下载下方的 `LongScreenshot_Release.ipa`
+            2. 使用 [Sideloadly](https://sideloadly.io/)、[AltStore](https://altstore.io/)、TrollStore 或 Scarlet 即可免费自签安装到真机！
           draft: false
           prerelease: false
           generate_release_notes: true

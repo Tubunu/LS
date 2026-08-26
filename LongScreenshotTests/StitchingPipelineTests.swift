@@ -201,4 +201,61 @@ final class StitchingPipelineTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(cg.height, 800)
         }
     }
+    
+    func testRecordingStitchWithFloatingBottomBar() async throws {
+        let engine = ImageStitchingEngine()
+        let width = 300
+        let height = 600
+        let topHeader = 40
+        let bottomToolbar = 100
+        
+        func createFrameWithToolbar(scrollY: Int) -> CGImage {
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
+            let img = renderer.image { ctx in
+                // Top header
+                UIColor.darkGray.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: width, height: topHeader))
+                
+                // Scrolling body
+                for y in topHeader..<(height - bottomToolbar) {
+                    let pattern = CGFloat(((y + scrollY) * 17) % 255) / 255.0
+                    UIColor(red: pattern, green: 0.6, blue: 1.0 - pattern, alpha: 1.0).setFill()
+                    ctx.fill(CGRect(x: 0, y: y, width: width, height: 1))
+                }
+                
+                // Bottom floating toolbar
+                UIColor.systemGray5.setFill()
+                ctx.fill(CGRect(x: 0, y: height - bottomToolbar, width: width, height: bottomToolbar))
+                
+                // Floating input box & button
+                UIColor.white.setFill()
+                ctx.fill(CGRect(x: 20, y: height - bottomToolbar + 15, width: width - 40, height: 40))
+            }
+            return img.cgImage!
+        }
+        
+        let img0 = createFrameWithToolbar(scrollY: 0)
+        let img1 = createFrameWithToolbar(scrollY: 100)
+        let img2 = createFrameWithToolbar(scrollY: 200)
+        let img3 = createFrameWithToolbar(scrollY: 300)
+        
+        let kf0 = KeyFrame(image: img0, cumulativeOffset: 0, timestamp: .zero, index: 0)
+        let kf1 = KeyFrame(image: img1, cumulativeOffset: 100, timestamp: .zero, index: 1)
+        let kf2 = KeyFrame(image: img2, cumulativeOffset: 200, timestamp: .zero, index: 2)
+        let kf3 = KeyFrame(image: img3, cumulativeOffset: 300, timestamp: .zero, index: 3)
+        
+        let result = try await engine.stitchFromRecording(
+            keyFrames: [kf0, kf1, kf2, kf3],
+            fixedRegions: FixedUIDetector.FixedRegions(topHeight: topHeader, bottomHeight: bottomToolbar),
+            blendWidth: 20
+        ) { _, _ in }
+        
+        XCTAssertNotNil(result.cgImage)
+        if let cg = result.cgImage {
+            XCTAssertEqual(cg.width, width)
+            // Stitched canvas should be close to 600 + 300 = 900
+            XCTAssertGreaterThanOrEqual(cg.height, 850)
+            XCTAssertLessThanOrEqual(cg.height, 950)
+        }
+    }
 }

@@ -98,7 +98,7 @@ public struct SettingsView: View {
                 HStack {
                     Label("应用版本", systemImage: "info.circle")
                     Spacer()
-                    Text("2.0.0 (Build 2026.1)")
+                    Text("2.3.2 (Build 2026.2)")
                         .foregroundStyle(.secondary)
                 }
                 

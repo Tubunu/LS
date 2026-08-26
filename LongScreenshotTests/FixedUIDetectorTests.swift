@@ -108,4 +108,67 @@ final class FixedUIDetectorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(result.topHeight, topBar - 2)
         XCTAssertLessThanOrEqual(result.topHeight, topBar + 2)
     }
+    
+    func testDetectsTallFloatingBottomBarWithTranslucency() async {
+        let detector = FixedUIDetector()
+        let width = 300
+        let height = 1000
+        let topBar = 60
+        let bottomBar = 150 // Tall floating toolbar + safe area (e.g. input bar with icons)
+        
+        func createTranslucentFloatingBarImage(scrollY: Int, noiseIntensity: CGFloat) -> CGImage {
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!
+            
+            // Top fixed header
+            context.setFillColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: topBar))
+            
+            // Scrolling body
+            let bodyStartY = topBar
+            let bodyEndY = height - bottomBar
+            for y in bodyStartY..<bodyEndY {
+                let patternVal = CGFloat(((y + scrollY) * 19) % 255) / 255.0
+                context.setFillColor(red: patternVal, green: 1.0 - patternVal, blue: 0.6, alpha: 1.0)
+                context.fill(CGRect(x: 0, y: y, width: width, height: 1))
+            }
+            
+            // Bottom floating bar with slight frosted glass translucency
+            for y in (height - bottomBar)..<height {
+                let baseColor: CGFloat = 0.92
+                // Frosted glass background with slight shifting through translucency
+                let shift = CGFloat(((y + scrollY) * 3) % 15) / 255.0 * noiseIntensity
+                context.setFillColor(red: baseColor + shift, green: baseColor + shift, blue: baseColor + shift, alpha: 1.0)
+                context.fill(CGRect(x: 0, y: y, width: width, height: 1))
+            }
+            
+            // Solid button/icon elements inside floating bar (identical across frames)
+            context.setFillColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1.0)
+            context.fill(CGRect(x: 30, y: height - bottomBar + 20, width: width - 60, height: 40))
+            
+            return context.makeImage()!
+        }
+        
+        let img1 = createTranslucentFloatingBarImage(scrollY: 0, noiseIntensity: 1.0)
+        let img2 = createTranslucentFloatingBarImage(scrollY: 200, noiseIntensity: 1.0)
+        let img3 = createTranslucentFloatingBarImage(scrollY: 400, noiseIntensity: 1.0)
+        
+        let kf1 = KeyFrame(image: img1, cumulativeOffset: 0, timestamp: .zero, index: 0)
+        let kf2 = KeyFrame(image: img2, cumulativeOffset: 200, timestamp: .zero, index: 1)
+        let kf3 = KeyFrame(image: img3, cumulativeOffset: 400, timestamp: .zero, index: 2)
+        
+        let result = await detector.detectFixedRegions(in: [kf1, kf2, kf3])
+        
+        // Should successfully identify the entire 150px floating bottom bar
+        XCTAssertGreaterThanOrEqual(result.bottomHeight, bottomBar - 4)
+        XCTAssertLessThanOrEqual(result.bottomHeight, bottomBar + 4)
+    }
 }

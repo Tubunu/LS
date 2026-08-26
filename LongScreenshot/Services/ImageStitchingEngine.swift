@@ -204,13 +204,12 @@ public actor ImageStitchingEngine {
         let cgWidth = CGFloat(width)
         
         // 1. Compute pixel-accurate displacement between consecutive keyframes
-        //    using full-image overlap search (same proven approach as screenshot mode).
-        //    This avoids the accumulated Vision tracking error from low-res frames that
-        //    causes false SAD matches on repetitive social-media feed content.
+        //    Prioritizes refined search guided by Vision tracking displacement within the
+        //    active scroll content ROI (excluding fixed top & bottom UI), then falls back to full overlap search.
         var displacements: [Int] = []
         let totalPairs = keyFrames.count - 1
         
-        // Pre-crop all keyframes to content area to exclude fixed UI from overlap matching
+        // Pre-crop content area for fallback matching
         let contentRect = CGRect(x: 0, y: CGFloat(contentTop), width: cgWidth, height: CGFloat(effectiveContentHeight))
         
         for i in 0..<totalPairs {
@@ -221,28 +220,40 @@ public actor ImageStitchingEngine {
             
             let img1 = keyFrames[i].image
             let img2 = keyFrames[i + 1].image
+            let expectedDelta = keyFrames[i + 1].cumulativeOffset - keyFrames[i].cumulativeOffset
             
-            // Crop to content area so fixed status bar / bottom bar don't interfere with matching
-            let croppedImg1 = img1.safeCropping(to: contentRect) ?? img1
-            let croppedImg2 = img2.safeCropping(to: contentRect) ?? img2
+            let (refinedDelta, confidence) = await overlapDetector.findRefinedDisplacement(
+                from: img1,
+                to: img2,
+                expectedDeltaY: expectedDelta,
+                topCrop: topCrop,
+                bottomCrop: bottomCrop,
+                referenceStripHeight: 140
+            )
             
-            // Full-image overlap search — no reliance on accumulated Vision prior
-            if let overlap = await overlapDetector.findOverlap(
-                bottomOf: croppedImg1,
-                topOf: croppedImg2,
-                referenceStripHeight: 200
-            ) {
-                let deltaY = overlap.refY - overlap.matchY
-                let validDelta = max(1, min(deltaY, effectiveContentHeight - 5))
-                displacements.append(validDelta)
-                AppLogger.stitching.info("Recording overlap: keyframe \(i)→\(i+1) deltaY=\(validDelta), confidence=\(overlap.confidence)")
+            let finalDelta: Int
+            if confidence >= 0.50 {
+                finalDelta = max(1, min(refinedDelta, effectiveContentHeight - 5))
+                AppLogger.stitching.info("Recording overlap: keyframe \(i)→\(i+1) refined deltaY=\(finalDelta), confidence=\(confidence)")
             } else {
-                // Fallback: use the accumulated Vision tracking prior (less accurate but better than nothing)
-                let expectedDelta = keyFrames[i + 1].cumulativeOffset - keyFrames[i].cumulativeOffset
-                let fallbackDelta = max(1, min(Int(expectedDelta.rounded()), effectiveContentHeight - 5))
-                displacements.append(fallbackDelta)
-                AppLogger.stitching.warning("Recording overlap detection failed between keyframe \(i) and \(i+1), using Vision prior: \(fallbackDelta)")
+                let croppedImg1 = img1.safeCropping(to: contentRect) ?? img1
+                let croppedImg2 = img2.safeCropping(to: contentRect) ?? img2
+                
+                if let overlap = await overlapDetector.findOverlap(
+                    bottomOf: croppedImg1,
+                    topOf: croppedImg2,
+                    referenceStripHeight: 160
+                ) {
+                    let deltaY = overlap.refY - overlap.matchY
+                    finalDelta = max(1, min(deltaY, effectiveContentHeight - 5))
+                    AppLogger.stitching.info("Recording overlap: keyframe \(i)→\(i+1) fallback search deltaY=\(finalDelta), confidence=\(overlap.confidence)")
+                } else {
+                    let fallbackDelta = max(1, min(Int(expectedDelta.rounded()), effectiveContentHeight - 5))
+                    finalDelta = fallbackDelta
+                    AppLogger.stitching.warning("Recording overlap detection failed between keyframe \(i) and \(i+1), using Vision prior: \(fallbackDelta)")
+                }
             }
+            displacements.append(finalDelta)
         }
         
         // 2. Build seamless slices using Consistent Cumulative Displacement Geometry

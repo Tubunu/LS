@@ -30,8 +30,8 @@ public final class RecordingViewModel: ObservableObject {
     /// Processes a screen recording video from the given file URL
     public func processRecording(
         url: URL,
-        samplingFPS: Double = 5.0,
-        keyFrameThreshold: CGFloat = 300.0,
+        samplingFPS: Double = 30.0,
+        keyFrameThreshold: CGFloat = 1000.0,
         autoDetectFixedUI: Bool = true,
         blendWidth: Int = 40
     ) async {
@@ -76,7 +76,10 @@ public final class RecordingViewModel: ObservableObject {
                 if Task.isCancelled || self.isCancelledManually { throw RecordingError.processingCancelled }
                 
                 // Stage 3: Keyframe Decimation & Filtering (70% ~ 82%)
-                let scaledThreshold = keyFrameThreshold / max(1.0, trackingScale)
+                // Dynamically ensure captureThreshold does not exceed 40% of screen height to guarantee ample overlap
+                let fullScreenH = CGFloat(frames.first?.image.height ?? 800) * trackingScale
+                let adaptiveKeyFrameThreshold = min(keyFrameThreshold, fullScreenH * 0.40)
+                let scaledThreshold = adaptiveKeyFrameThreshold / max(1.0, trackingScale)
                 let config = KeyFrameSelector.Config(captureThreshold: scaledThreshold)
                 let trackingKeyFrames = await self.keyFrameSelector.selectKeyFrames(
                     from: displacements,

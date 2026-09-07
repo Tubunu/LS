@@ -49,9 +49,9 @@ public actor FixedUIDetector {
             return FixedRegions(topHeight: baselineTop, bottomHeight: baselineBottom)
         }
         
-        // Dynamic search boundaries (covers status bar + large nav bar / search bar at top, and home indicator + floating toolbar at bottom)
-        let maxTopCheck = min(height / 3, max(baselineTop + 40, Int(160.0 * baselineScale)))
-        let maxBottomCheck = min(height / 3, max(baselineBottom + 40, Int(150.0 * baselineScale)))
+        // Dynamic search boundaries (covers status bar + large nav bar / search bar / tab bar at top, and home indicator + floating toolbar / action button at bottom)
+        let maxTopCheck = min(height / 3, max(baselineTop + 40, Int(max(340.0, 240.0 * baselineScale))))
+        let maxBottomCheck = min(height / 3, max(baselineBottom + 40, Int(max(200.0, 160.0 * baselineScale))))
         
         var topFixed = baselineTop
         var bottomFixed = baselineBottom
@@ -73,6 +73,7 @@ public actor FixedUIDetector {
                     pairBuffers: pairPixelBuffers
                 )
                 
+                let maxTopTolerance = Int(40.0 * baselineScale)
                 var bestTop = baselineTop
                 var consecutiveNonStatic = 0
                 for row in 0..<maxTopCheck {
@@ -83,8 +84,8 @@ public actor FixedUIDetector {
                         consecutiveNonStatic = 0
                     } else {
                         consecutiveNonStatic += 1
-                        // Window tolerance: if we encounter > 28 continuous non-stationary rows, scrolling content has started
-                        if consecutiveNonStatic > 28 {
+                        // Window tolerance: if we encounter continuous non-stationary rows, scrolling content has started
+                        if consecutiveNonStatic > maxTopTolerance {
                             break
                         }
                     }
@@ -93,7 +94,7 @@ public actor FixedUIDetector {
             }
         }
         
-        // 2. Analyze bottom candidate region (Home Indicator / Tab Bar / Floating Input Bar / Toolbar)
+        // 2. Analyze bottom candidate region (Home Indicator / Tab Bar / Floating Input Bar / Floating Pills)
         if maxBottomCheck > baselineBottom {
             let bottomRect = CGRect(x: 0, y: CGFloat(height - maxBottomCheck), width: CGFloat(width), height: CGFloat(maxBottomCheck))
             let pairPixelBuffers = pairs.compactMap { pair -> (a: [Float], b: [Float])? in
@@ -110,6 +111,7 @@ public actor FixedUIDetector {
                     pairBuffers: pairPixelBuffers
                 )
                 
+                let maxBottomTolerance = Int(14.0 * baselineScale)
                 var bestBottom = baselineBottom
                 var consecutiveNonStatic = 0
                 // Scan upward from the screen bottom (localRow = maxBottomCheck - 1)
@@ -121,13 +123,34 @@ public actor FixedUIDetector {
                         consecutiveNonStatic = 0
                     } else {
                         consecutiveNonStatic += 1
-                        // Window tolerance: allow up to 32 rows of gap/translucency between home bar and floating toolbar
-                        if consecutiveNonStatic > 32 {
+                        // Window tolerance: allow gap/translucency between home bar and floating toolbar
+                        if consecutiveNonStatic > maxBottomTolerance {
                             break
                         }
                     }
                 }
                 bottomFixed = max(baselineBottom, bestBottom)
+            }
+        }
+        
+        // 3. Detect Floating Pills / Action Buttons in bottom candidate band (dist 180..420px)
+        if height > 1000, let firstFrame = keyFrames.first {
+            let maxPillCheck = min(Int(CGFloat(height) * 0.20), Int(140.0 * baselineScale))
+            let pillCheckTop = height - maxPillCheck
+            let pillCheckBottom = height - bottomFixed
+            
+            if pillCheckBottom > pillCheckTop {
+                let midX = Int(Double(width) * 0.30)
+                let midW = Int(Double(width) * 0.40)
+                let pillCheckH = pillCheckBottom - pillCheckTop
+                let pillRect = CGRect(x: CGFloat(midX), y: CGFloat(pillCheckTop), width: CGFloat(midW), height: CGFloat(pillCheckH))
+                
+                let (detected, pillDistFromBottom) = PixelBuffer.detectFloatingPillRegion(in: firstFrame.image, searchRect: pillRect, threshold: 40)
+                if detected {
+                    let adjustedBottom = pillDistFromBottom + Int(8.0 * baselineScale)
+                    bottomFixed = max(bottomFixed, adjustedBottom)
+                    AppLogger.stitching.info("FixedUIDetector: Floating action pill detected in initial frame! Extended bottom crop to \(bottomFixed)px")
+                }
             }
         }
         
@@ -178,9 +201,16 @@ public actor FixedUIDetector {
         diffBuffer.withUnsafeMutableBufferPointer { diffPtr in
             guard let diffBase = diffPtr.baseAddress else { return }
             
+            let midStart = width / 4
+            let midCount = width / 2
+            let rightStart = Int(Float(width) * 0.80)
+            let rightCount = max(10, Int(Float(width) * 0.16))
+            
             for row in 0..<rowCount {
                 let rowOffset = row * width
                 var totalSAD: Float = 0.0
+                var totalMidSAD: Float = 0.0
+                var totalRightSAD: Float = 0.0
                 var matchCount = 0
                 
                 for pair in pairBuffers {
@@ -199,7 +229,18 @@ public actor FixedUIDetector {
                                 diffBuffer: diffBase
                             )
                             totalSAD += sad
-                            if sad <= Self.singlePairRowSADThreshold {
+                            
+                            var midDiffSum: Float = 0
+                            vDSP_sve(diffBase.advanced(by: midStart), 1, &midDiffSum, vDSP_Length(midCount))
+                            let midSAD = midDiffSum / Float(midCount)
+                            totalMidSAD += midSAD
+                            
+                            var rightDiffSum: Float = 0
+                            vDSP_sve(diffBase.advanced(by: rightStart), 1, &rightDiffSum, vDSP_Length(rightCount))
+                            let rightSAD = rightDiffSum / Float(rightCount)
+                            totalRightSAD += rightSAD
+                            
+                            if sad <= Self.singlePairRowSADThreshold || midSAD <= 16.0 || rightSAD <= 16.0 {
                                 matchCount += 1
                             }
                         }
@@ -207,10 +248,19 @@ public actor FixedUIDetector {
                 }
                 
                 let avgSAD = totalSAD / Float(totalPairs)
+                let avgMidSAD = totalMidSAD / Float(totalPairs)
+                let avgRightSAD = totalRightSAD / Float(totalPairs)
                 let matchRatio = Float(matchCount) / Float(totalPairs)
                 
-                // A row is stationary if either the average SAD is low or the majority of pairs match
-                if avgSAD <= Self.avgRowSADThreshold || matchRatio >= 0.60 {
+                // A row is stationary if:
+                // 1. Full row has very low SAD across all pairs (e.g. solid background toolbar/navbar), or
+                // 2. Average SAD is low AND matchRatio is high (>= 80% pairs agree, preventing scrolling white space from tricking the detector), or
+                // 3. Center segment (floating pill) or right segment (back-to-top button) is persistently static (>= 75% pairs agree).
+                let isSolidStatic = avgSAD <= 12.0
+                let isWholeStatic = avgSAD <= Self.avgRowSADThreshold && matchRatio >= 0.80
+                let isSegmentStatic = (avgMidSAD <= 16.0 || avgRightSAD <= 16.0) && matchRatio >= 0.75
+                
+                if isSolidStatic || isWholeStatic || isSegmentStatic {
                     mask[row] = true
                 }
             }

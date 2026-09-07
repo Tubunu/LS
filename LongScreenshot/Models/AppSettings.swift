@@ -39,6 +39,6 @@ public enum AppSettings {
     public static let defaultOutputQuality: Double = 1.0
     public static let defaultAutoDetectFixedUI: Bool = true
     public static let defaultBlendingWidth: Double = 40.0
-    public static let defaultRecordingSamplingFPS: Double = 5.0
-    public static let defaultKeyFrameThreshold: Double = 300.0
+    public static let defaultRecordingSamplingFPS: Double = 30.0
+    public static let defaultKeyFrameThreshold: Double = 1000.0
 }

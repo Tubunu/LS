@@ -52,25 +52,50 @@ public actor OverlapDetector {
         let stripH = min(referenceStripHeight, max(30, roiHeight / 4))
         let stripPixelCount = stripH * cropWidth
         
-        // Test candidate sample positions inside the lower-to-middle active content area
-        let candidateRatios: [Double] = [0.65, 0.50, 0.78, 0.38]
+        let priorDelta = max(1, Int(expectedDeltaY.rounded()))
+        // Determine physical overlap zone in image1:
+        // Since content moved UP by priorDelta, the portion of image1 still visible in image2 is:
+        // [roiTop + priorDelta, roiBottom]
+        let minRefY = roiTop + priorDelta
+        let maxRefY = roiBottom - stripH
+        
+        let candidateYPositions: [Int]
+        if maxRefY >= minRefY {
+            let range = maxRefY - minRefY
+            // Generate 5 candidate positions across the physical overlap zone
+            candidateYPositions = (1...5).map { step in
+                minRefY + (range * step) / 6
+            }
+        } else {
+            // Fallback if displacement approaches or exceeds effective content height
+            candidateYPositions = [max(roiTop, roiBottom - stripH - 5)]
+        }
+        
         var diffBuffer = [Float](repeating: 0, count: stripPixelCount)
         
-        var bestDeltaY: Int = max(1, Int(expectedDeltaY.rounded()))
-        var bestConfidence: Float = 0.0
-        var bestSADValue: Float = Float.infinity
+        // Search radius around expected displacement (+/- 200px or 45% of prior)
+        let searchRadius = max(200, Int(Double(priorDelta) * 0.45))
         
-        let priorDelta = max(1, Int(expectedDeltaY.rounded()))
-        // Define search radius around expected displacement (at least +/- 120px)
-        let searchRadius = max(120, Int(Double(priorDelta) * 0.40))
+        struct CandidateObservation {
+            let deltaY: Int
+            let confidence: Float
+            let sad: Float
+            let stdDev: Float
+        }
+        var observations: [CandidateObservation] = []
         
-        for ratio in candidateRatios {
-            let refCenterY = roiTop + Int(Double(roiHeight) * ratio)
-            let refY = max(roiTop + 5, min(roiBottom - stripH - 5, refCenterY - stripH / 2))
+        for refY in candidateYPositions {
+            guard refY >= roiTop, refY + stripH <= roiBottom else { continue }
             
             let refRect = CGRect(x: CGFloat(leftMargin), y: CGFloat(refY), width: CGFloat(cropWidth), height: CGFloat(stripH))
             let refStrip = PixelBuffer.extractGrayscalePixels(from: image1, rect: refRect)
             guard refStrip.count == stripPixelCount else { continue }
+            
+            // Texture check: avoid completely flat untextured blank white or solid black strips (< 0.5)
+            let refStdDev = PixelBuffer.computeStdDev(buffer: refStrip)
+            if refStdDev < 0.5 && !observations.isEmpty {
+                continue
+            }
             
             // Expected match position in image2
             let expectedMatchY = refY - priorDelta
@@ -87,18 +112,18 @@ public actor OverlapDetector {
             let searchArea = PixelBuffer.extractGrayscalePixels(from: image2, rect: searchRect)
             guard searchArea.count >= searchHeight * cropWidth else { continue }
             
-            var localBestOffset = 0
-            var localBestSAD: Float = Float.infinity
-            var minSADCount = 0
+            var coarseBestOffset = 0
+            var coarseBestSAD: Float = Float.infinity
             
-            let found = refStrip.withUnsafeBufferPointer { refPtr -> Bool in
+            // Stage 1: Coarse search (stride: 2px)
+            let coarseFound = refStrip.withUnsafeBufferPointer { refPtr -> Bool in
                 guard let refBase = refPtr.baseAddress else { return false }
                 return searchArea.withUnsafeBufferPointer { searchPtr -> Bool in
                     guard let searchBase = searchPtr.baseAddress else { return false }
                     return diffBuffer.withUnsafeMutableBufferPointer { diffPtr -> Bool in
                         guard let diffBase = diffPtr.baseAddress else { return false }
                         
-                        for offset in 0...maxSearchOffset {
+                        for offset in stride(from: 0, through: maxSearchOffset, by: 2) {
                             let currentSearchPtr = searchBase.advanced(by: offset * cropWidth)
                             let sad = PixelBuffer.computeSADDirect(
                                 ptrA: refBase,
@@ -106,7 +131,39 @@ public actor OverlapDetector {
                                 count: stripPixelCount,
                                 diffBuffer: diffBase
                             )
-                            
+                            if sad < coarseBestSAD {
+                                coarseBestSAD = sad
+                                coarseBestOffset = offset
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
+            guard coarseFound else { continue }
+            
+            // Stage 2: Fine search (stride: 1px) in +/- 4px window around coarse optimum
+            let fineMinOffset = max(0, coarseBestOffset - 4)
+            let fineMaxOffset = min(maxSearchOffset, coarseBestOffset + 4)
+            var localBestOffset = coarseBestOffset
+            var localBestSAD = coarseBestSAD
+            var minSADCount = 0
+            
+            let fineFound = refStrip.withUnsafeBufferPointer { refPtr -> Bool in
+                guard let refBase = refPtr.baseAddress else { return false }
+                return searchArea.withUnsafeBufferPointer { searchPtr -> Bool in
+                    guard let searchBase = searchPtr.baseAddress else { return false }
+                    return diffBuffer.withUnsafeMutableBufferPointer { diffPtr -> Bool in
+                        guard let diffBase = diffPtr.baseAddress else { return false }
+                        
+                        for offset in fineMinOffset...fineMaxOffset {
+                            let currentSearchPtr = searchBase.advanced(by: offset * cropWidth)
+                            let sad = PixelBuffer.computeSADDirect(
+                                ptrA: refBase,
+                                ptrB: currentSearchPtr,
+                                count: stripPixelCount,
+                                diffBuffer: diffBase
+                            )
                             if sad < localBestSAD - 0.05 {
                                 localBestSAD = sad
                                 localBestOffset = offset
@@ -119,8 +176,7 @@ public actor OverlapDetector {
                     }
                 }
             }
-            
-            guard found else { continue }
+            guard fineFound else { continue }
             
             let matchedYInImg2 = minMatchY + localBestOffset
             let calculatedDeltaY = refY - matchedYInImg2
@@ -128,29 +184,61 @@ public actor OverlapDetector {
             guard calculatedDeltaY > 0, calculatedDeltaY < height1 else { continue }
             
             var confidence = max(0, 1.0 - localBestSAD / Self.maxSADConfidenceScale)
+            // Ambiguity penalty for repeating/low textures unless NCC verifies alignment
             if minSADCount > 3 && localBestSAD < Self.minAmbiguitySADThreshold {
-                confidence = max(0, confidence - 0.3)
+                let testStrip = Array(searchArea[(localBestOffset * cropWidth)..<(localBestOffset * cropWidth + stripPixelCount)])
+                let ncc = PixelBuffer.computeNCC(bufferA: refStrip, bufferB: testStrip)
+                if ncc >= 0.95 {
+                    confidence = max(confidence, 0.80)
+                } else {
+                    confidence = max(0, confidence - 0.3)
+                }
             }
             
-            if confidence > bestConfidence || (abs(confidence - bestConfidence) < 0.1 && localBestSAD < bestSADValue) {
-                bestConfidence = confidence
-                bestSADValue = localBestSAD
-                bestDeltaY = calculatedDeltaY
-                
-                // If extremely confident and near expected displacement, accept immediately
-                if confidence >= 0.88 && abs(calculatedDeltaY - priorDelta) <= 15 {
-                    break
-                }
+            observations.append(CandidateObservation(
+                deltaY: calculatedDeltaY,
+                confidence: confidence,
+                sad: localBestSAD,
+                stdDev: refStdDev
+            ))
+        }
+        
+        // Multi-strip Consensus & Outlier Filtering
+        if !observations.isEmpty {
+            // Sort by deltaY to find median
+            let sortedByDelta = observations.sorted { $0.deltaY < $1.deltaY }
+            let medianDelta = sortedByDelta[sortedByDelta.count / 2].deltaY
+            
+            // Inliers within +/- 4px of median
+            let inliers = observations.filter { abs($0.deltaY - medianDelta) <= 4 }
+            let confidentInliers = inliers.filter { $0.confidence >= Self.minConfidenceThreshold }
+            let targetGroup = !confidentInliers.isEmpty ? confidentInliers : inliers
+            
+            // Weighted average by inverse SAD squared (giving overwhelming weight to sharp, ultra-low SAD matches)
+            var totalWeight: Float = 0
+            var weightedSum: Float = 0
+            var maxConfidence: Float = 0
+            
+            for item in targetGroup {
+                let weight = 1.0 / pow(max(0.1, item.sad + 0.05), 2)
+                totalWeight += weight
+                weightedSum += Float(item.deltaY) * weight
+                maxConfidence = max(maxConfidence, item.confidence)
+            }
+            
+            let consensusDelta = totalWeight > 0 ? Int((weightedSum / totalWeight).rounded()) : medianDelta
+            
+            if maxConfidence >= Self.minConfidenceThreshold {
+                AppLogger.stitching.info("Consensus displacement found: deltaY=\(consensusDelta), confidence=\(maxConfidence) (median=\(medianDelta), prior=\(priorDelta))")
+                return (deltaY: consensusDelta, confidence: maxConfidence)
+            } else {
+                AppLogger.stitching.warning("Consensus displacement confidence low (\(maxConfidence)), fallback to prior: \(priorDelta)")
+                return (deltaY: priorDelta, confidence: maxConfidence)
             }
         }
         
-        if bestConfidence >= Self.minConfidenceThreshold {
-            AppLogger.stitching.info("Refined displacement found: deltaY=\(bestDeltaY), confidence=\(bestConfidence) (prior=\(priorDelta))")
-            return (deltaY: bestDeltaY, confidence: bestConfidence)
-        } else {
-            AppLogger.stitching.warning("Refined displacement fallback to prior: deltaY=\(priorDelta) (best confidence was \(bestConfidence))")
-            return (deltaY: priorDelta, confidence: bestConfidence)
-        }
+        AppLogger.stitching.warning("Refined displacement fallback to prior: deltaY=\(priorDelta)")
+        return (deltaY: priorDelta, confidence: 0.0)
     }
     
     /// Finds the optimal overlap offset and vertical displacement between image1 and image2

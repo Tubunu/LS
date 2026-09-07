@@ -27,3 +27,12 @@ fastlane/test_output
 
 # CocoaPods
 Pods/
+
+# Test media and scratch directories
+*.mp4
+*.MP4
+scratch/
+scratch_*/
+temp_*/
+output/
+build/

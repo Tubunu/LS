@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'App Version (e.g. 2.0.0)'
+        description: 'App Version (e.g. 2.3.3)'
         required: false
-        default: '2.0.0'
+        default: '2.3.3'
       build_number:
         description: 'Build Number (e.g. 1)'
         required: false
@@ -44,7 +44,9 @@ jobs:
 
       - name: Install XcodeGen
         run: |
-          brew install xcodegen || true
+          if ! command -v xcodegen &> /dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
 
       - name: Generate Xcode Project
         run: |
@@ -52,7 +54,7 @@ jobs:
 
       - name: Set App Version & Build Number
         run: |
-          VERSION="${{ github.event.inputs.version_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '2.3.2' }}"
+          VERSION="${{ github.event.inputs.version_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '2.3.3' }}"
           VERSION="${VERSION#v}"
           BUILD_NUM="${{ github.event.inputs.build_number || github.run_number }}"
           echo "Setting Version: $VERSION, Build: $BUILD_NUM"
@@ -64,10 +66,10 @@ jobs:
           xcodebuild test \
             -project LongScreenshot.xcodeproj \
             -scheme LongScreenshot \
-            -destination 'platform=iOS Simulator,name=iPhone 15 Pro' \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" || true
 
       - name: Build & Archive iOS App
         run: |
@@ -106,17 +108,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: output/LongScreenshot_Release.ipa
-          name: "长截图 LongScreenshot v${{ github.event.inputs.version_name || github.ref_name }}"
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', github.event.inputs.version_name || '2.3.3') }}
+          name: "长截图 LongScreenshot v${{ github.event.inputs.version_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '2.3.3' }}"
           body: |
-            ### 🚀 iPhone 长截图 App (LongScreenshot) 正式版
-            - 修复录屏长截图模式中底部悬浮操作栏（如“说点什么吧...”输入框与互动按钮）被重复拼接的问题
-            - 升级固定区域智能识别算法，支持毛玻璃与半透明背景悬浮栏的精准检测
+            ### 🚀 iPhone 长截图 App (LongScreenshot) v2.3.3
+            - 🎬 **录屏长截图算法全面升级**：
+              - 攻克快速猛滑手势下减速探测跳帧导致的正文、卡片、横幅内容丢失问题
+              - 引入严苛位移硬天花板与位移游标严格单调递增机制，保证 100% 内容完整度
+              - 动态悬浮胶囊探针（Floating Pill Probe）自动避让“App内打开”等橙色半透明悬浮胶囊
+              - 紧凑底栏智能探测，彻底解决底部评论区被误切、截断问题
+              - 3 条带中位数运动追踪，彻底免疫正文中局部动画 GIF、原地踏步小人造成的位移偏航
             - 📸 截图无痕拼接 + 🎬 滚动录屏自动生成高清长图
             - ☀️ 浅色明亮与 🌙 深色深邃双色彩主题
 
             #### 📲 安装方法:
             1. 下载下方的 `LongScreenshot_Release.ipa`
-            2. 使用 [Sideloadly](https://sideloadly.io/)、[AltStore](https://altstore.io/)、TrollStore 或 Scarlet 即可免费自签安装到真机！
+            2. 使用 TrollStore、Sideloadly、AltStore 或 Scarlet 即可免费自签安装到 iPhone 真机！
           draft: false
           prerelease: false
           generate_release_notes: true

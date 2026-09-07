@@ -44,6 +44,7 @@ public actor KeyFrameSelector {
         var sinceLastCapture: CGFloat = 0
         var dirAccumulator: CGFloat = 0
         var primaryScrollDirection: CGFloat = 0
+        var latestForwardFrame = displacements[0]
         
         // The first frame is always the starting keyframe
         keyFrames.append(KeyFrame(
@@ -55,47 +56,85 @@ public actor KeyFrameSelector {
         
         let total = displacements.count
         
-        for (index, disp) in displacements.enumerated() {
+        var index = 1
+        while index < total {
             if Task.isCancelled { return [] }
-            guard index > 0 else { continue }
-            
+            let disp = displacements[index]
             let absDy = abs(disp.dy)
             
             // 1. Filter out static or non-scrolling frames
             if !disp.isScrolling || absDy < config.minScrollSpeed {
+                index += 1
                 continue
             }
             
-            // 2. Filter out extreme sudden jumps (probable blur)
-            if absDy > config.maxScrollSpeed {
-                continue
-            }
+            // 2. Clamp extreme sudden jumps to maxScrollSpeed rather than discarding motion
+            let effectiveDy = min(absDy, config.maxScrollSpeed)
             
             // 3. Establish & verify scroll direction consistency (downward vs upward)
             let currentDirection: CGFloat = disp.dy > 0 ? 1 : -1
             if primaryScrollDirection == 0 {
                 dirAccumulator += disp.dy
-                if abs(dirAccumulator) >= 15.0 {
+                if abs(dirAccumulator) >= 10.0 {
                     primaryScrollDirection = dirAccumulator > 0 ? 1 : -1
                 } else {
-                    // Suppress initial minor jitter until meaningful movement is established
+                    index += 1
                     continue
                 }
             } else if currentDirection != primaryScrollDirection {
                 // Ignore bouncing or reversed scroll jitter
+                index += 1
                 continue
             }
             
             // 4. Accumulate displacement
-            cumulativeOffset += absDy
-            sinceLastCapture += absDy
+            cumulativeOffset += effectiveDy
+            sinceLastCapture += effectiveDy
+            latestForwardFrame = disp
             
             // 5. Trigger keyframe capture if threshold reached
             if sinceLastCapture >= config.captureThreshold {
+                var captureTarget = disp
+                var bestIndex = index
+                
+                // If currently in rapid motion (potential motion blur), look ahead for the next local deceleration / pause
+                // Strict hard ceiling: lookahead must never exceed captureThreshold * 1.25 to prevent skipping content
+                if absDy > 20.0 && index + 1 < total {
+                    var minSpeed = absDy
+                    let maxLookaheadDist = config.captureThreshold * 1.25
+                    let lookEnd = min(total, index + 15)
+                    var runningDist = sinceLastCapture
+                    
+                    for j in (index + 1)..<lookEnd {
+                        let candDy = min(abs(displacements[j].dy), config.maxScrollSpeed)
+                        runningDist += candDy
+                        if runningDist > maxLookaheadDist {
+                            break
+                        }
+                        let candSpeed = abs(displacements[j].dy)
+                        if candSpeed < minSpeed {
+                            minSpeed = candSpeed
+                            captureTarget = displacements[j]
+                            bestIndex = j
+                        }
+                        if candSpeed <= 3.0 { break }
+                    }
+                }
+                
+                // If we looked ahead and picked a frame ahead, advance cumulativeOffset and index accordingly
+                if bestIndex > index {
+                    for j in (index + 1)...bestIndex {
+                        let candDy = min(abs(displacements[j].dy), config.maxScrollSpeed)
+                        cumulativeOffset += candDy
+                    }
+                    latestForwardFrame = captureTarget
+                    index = bestIndex
+                }
+                
                 keyFrames.append(KeyFrame(
-                    image: disp.frame.image,
+                    image: captureTarget.frame.image,
                     cumulativeOffset: cumulativeOffset,
-                    timestamp: disp.frame.timestamp,
+                    timestamp: captureTarget.frame.timestamp,
                     index: keyFrames.count
                 ))
                 sinceLastCapture = 0
@@ -103,17 +142,19 @@ public actor KeyFrameSelector {
                 let progress = 0.70 + (Double(index) / Double(total)) * 0.15
                 await progressHandler(progress, "已筛选 \(keyFrames.count) 个关键帧...")
             }
+            
+            index += 1
         }
         
-        // 6. Guarantee the last scrolling frame is captured only if it adds meaningful new content
-        if let lastScrollingDisp = displacements.last(where: { $0.isScrolling }),
-           sinceLastCapture > 10.0 {
+        // 6. Guarantee the final settled frame is captured if it adds meaningful new content (discarding terminal rebound)
+        if sinceLastCapture > 10.0 {
+            let targetFrame = latestForwardFrame
             let lastCapturedTimestamp = keyFrames.last?.timestamp
-            if lastCapturedTimestamp != lastScrollingDisp.frame.timestamp {
+            if lastCapturedTimestamp != targetFrame.frame.timestamp {
                 keyFrames.append(KeyFrame(
-                    image: lastScrollingDisp.frame.image,
+                    image: targetFrame.frame.image,
                     cumulativeOffset: cumulativeOffset,
-                    timestamp: lastScrollingDisp.frame.timestamp,
+                    timestamp: targetFrame.frame.timestamp,
                     index: keyFrames.count
                 ))
             }

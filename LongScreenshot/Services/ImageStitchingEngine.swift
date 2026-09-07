@@ -253,7 +253,83 @@ public actor ImageStitchingEngine {
                     AppLogger.stitching.warning("Recording overlap detection failed between keyframe \(i) and \(i+1), using Vision prior: \(fallbackDelta)")
                 }
             }
-            displacements.append(finalDelta)
+            
+            // Seam Quality Gate: inspect 8px boundary continuity at anchorCutY
+            var verifiedDelta = finalDelta
+            let seamH = 8
+            let seamLeft = max(8, Int(Double(width) * 0.04))
+            let seamRight = max(16, Int(Double(width) * 0.08))
+            let seamW = width - seamLeft - seamRight
+            
+            if contentBottom - seamH >= contentTop && (contentBottom - finalDelta - seamH) >= contentTop && seamW > 40 {
+                let rect1 = CGRect(x: CGFloat(seamLeft), y: CGFloat(contentBottom - seamH), width: CGFloat(seamW), height: CGFloat(seamH))
+                let buf1 = PixelBuffer.extractGrayscalePixels(from: img1, rect: rect1)
+                
+                if buf1.count == seamH * seamW {
+                    var bestMicroDelta = finalDelta
+                    var minSeamSAD: Float = Float.infinity
+                    
+                    // Test offsets in -2...+2 around finalDelta
+                    for offset in -2...2 {
+                        let testDelta = finalDelta + offset
+                        guard (contentBottom - testDelta - seamH) >= contentTop else { continue }
+                        let rect2 = CGRect(x: CGFloat(seamLeft), y: CGFloat(contentBottom - testDelta - seamH), width: CGFloat(seamW), height: CGFloat(seamH))
+                        let buf2 = PixelBuffer.extractGrayscalePixels(from: img2, rect: rect2)
+                        guard buf2.count == seamH * seamW else { continue }
+                        let sad = PixelBuffer.computeSAD(bufferA: buf1, bufferB: buf2)
+                        if sad < minSeamSAD {
+                            minSeamSAD = sad
+                            bestMicroDelta = testDelta
+                        }
+                    }
+                    
+                    // Stage 2: Expanded global recovery if seamSAD > 15.0 (recovers from any motion tracking drift)
+                    if minSeamSAD > 15.0 {
+                        var expandedBestDelta = bestMicroDelta
+                        var expandedMinSAD = minSeamSAD
+                        let minSearchDelta = max(1, finalDelta - 400)
+                        let maxSearchDelta = min(effectiveContentHeight - 5, finalDelta + 400)
+                        
+                        for testDelta in stride(from: minSearchDelta, through: maxSearchDelta, by: 2) {
+                            guard (contentBottom - testDelta - seamH) >= contentTop else { continue }
+                            let rect2 = CGRect(x: CGFloat(seamLeft), y: CGFloat(contentBottom - testDelta - seamH), width: CGFloat(seamW), height: CGFloat(seamH))
+                            let buf2 = PixelBuffer.extractGrayscalePixels(from: img2, rect: rect2)
+                            guard buf2.count == seamH * seamW else { continue }
+                            let sad = PixelBuffer.computeSAD(bufferA: buf1, bufferB: buf2)
+                            if sad < expandedMinSAD {
+                                expandedMinSAD = sad
+                                expandedBestDelta = testDelta
+                            }
+                        }
+                        
+                        for micro in -2...2 {
+                            let testDelta = expandedBestDelta + micro
+                            guard (contentBottom - testDelta - seamH) >= contentTop else { continue }
+                            let rect2 = CGRect(x: CGFloat(seamLeft), y: CGFloat(contentBottom - testDelta - seamH), width: CGFloat(seamW), height: CGFloat(seamH))
+                            let buf2 = PixelBuffer.extractGrayscalePixels(from: img2, rect: rect2)
+                            guard buf2.count == seamH * seamW else { continue }
+                            let sad = PixelBuffer.computeSAD(bufferA: buf1, bufferB: buf2)
+                            if sad < expandedMinSAD {
+                                expandedMinSAD = sad
+                                expandedBestDelta = testDelta
+                            }
+                        }
+                        
+                        if expandedMinSAD < 10.0 && expandedBestDelta != finalDelta {
+                            AppLogger.stitching.warning("Seam Quality Gate: Expanded recovery adjusted delta from \(finalDelta) to \(expandedBestDelta) (SAD=\(expandedMinSAD))")
+                            bestMicroDelta = expandedBestDelta
+                            minSeamSAD = expandedMinSAD
+                        }
+                    }
+                    
+                    if bestMicroDelta != finalDelta {
+                        AppLogger.stitching.info("Seam Quality Gate micro-adjustment: keyframe \(i)→\(i+1) adjusted delta from \(finalDelta) to \(bestMicroDelta) (SAD=\(minSeamSAD))")
+                        verifiedDelta = bestMicroDelta
+                    }
+                }
+            }
+            
+            displacements.append(verifiedDelta)
         }
         
         // 2. Build seamless slices using Consistent Cumulative Displacement Geometry
@@ -332,12 +408,21 @@ public actor ImageStitchingEngine {
                 UIImage(cgImage: topPart).draw(in: CGRect(x: 0, y: 0, width: cgWidth, height: CGFloat(topCrop)))
             }
             
-            // 3.2 Draw Sequential Body Slices with pixel-precise alignment
+            // 3.2 Draw Sequential Body Slices with pixel-precise alignment and scrollbar removal
+            let scrollbarWidth: CGFloat = max(16.0, 8.0 * baselineScale)
             for slice in slices {
                 autoreleasepool {
                     if let cropped = slice.frame.safeCropping(to: slice.srcRect) {
                         let renderRect = CGRect(x: 0, y: slice.destY, width: cgWidth, height: slice.height)
                         UIImage(cgImage: cropped).draw(in: renderRect)
+                        
+                        // Eliminate transient iOS vertical scroll indicator on right edge of body slices
+                        let sampleX = max(0, cgWidth - scrollbarWidth - 2.0)
+                        let sampleRect = CGRect(x: sampleX, y: slice.srcRect.origin.y, width: 1.0, height: slice.srcRect.height)
+                        if let cleanMargin = slice.frame.safeCropping(to: sampleRect) {
+                            let cleanDest = CGRect(x: sampleX + 1.0, y: slice.destY, width: scrollbarWidth + 1.0, height: slice.height)
+                            UIImage(cgImage: cleanMargin).draw(in: cleanDest)
+                        }
                     }
                 }
             }

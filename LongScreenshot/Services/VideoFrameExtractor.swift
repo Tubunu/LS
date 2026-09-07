@@ -19,7 +19,7 @@ public actor VideoFrameExtractor {
     /// - Returns: Tuple of extracted FrameData and coordinateScale factor to convert to full resolution
     public func extractTrackingFrames(
         from url: URL,
-        samplingFPS: Double = 5.0,
+        samplingFPS: Double = 30.0,
         maxTrackingWidth: CGFloat = 360.0,
         progressHandler: @Sendable @MainActor (Double, String) -> Void
     ) async throws -> (frames: [FrameData], trackingScale: CGFloat) {
@@ -78,7 +78,7 @@ public actor VideoFrameExtractor {
         }
         
         // 3. Sample frames according to requested frame interval
-        let effectiveFPS = max(1.0, min(samplingFPS, 30.0))
+        let effectiveFPS = max(1.0, min(samplingFPS, 60.0))
         let frameInterval = 1.0 / effectiveFPS
         var frames: [FrameData] = []
         var frameIndex = 0

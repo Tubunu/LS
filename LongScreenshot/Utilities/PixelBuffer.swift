@@ -140,4 +140,73 @@ public enum PixelBuffer {
         guard denom > 1e-5 else { return 0 }
         return dotProd / denom
     }
+    
+    /// Computes the standard deviation of a Float pixel buffer using vDSP
+    public static func computeStdDev(buffer: [Float]) -> Float {
+        guard !buffer.isEmpty else { return 0 }
+        var mean: Float = 0
+        vDSP_meanv(buffer, 1, &mean, vDSP_Length(buffer.count))
+        var meanSq: Float = 0
+        vDSP_measqv(buffer, 1, &meanSq, vDSP_Length(buffer.count))
+        let variance = max(0, meanSq - mean * mean)
+        return sqrt(variance)
+    }
+    
+    /// Analyzes RGBA pixels in a CGImage to detect high-chrominance elements (like floating orange/red pills)
+    public static func detectFloatingPillRegion(in image: CGImage, searchRect: CGRect, threshold: Int = 40) -> (detected: Bool, topDistFromBottom: Int) {
+        guard let cropped = image.safeCropping(to: searchRect) ?? image.cropping(to: searchRect) else {
+            return (false, 0)
+        }
+        let width = cropped.width
+        let height = cropped.height
+        guard width > 0, height > 0 else { return (false, 0) }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        var rawData = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &rawData,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else {
+            return (false, 0)
+        }
+        
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1.0, y: -1.0)
+        context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        var coloredPixelCount = 0
+        var firstColoredRow = -1
+        
+        for row in 0..<height {
+            let rowOffset = row * width * 4
+            var rowHasColored = false
+            for col in 0..<width {
+                let p = rowOffset + col * 4
+                let r = Int(rawData[p])
+                let g = Int(rawData[p + 1])
+                let b = Int(rawData[p + 2])
+                let colorDiff = abs(r - g) + abs(g - b) + abs(b - r)
+                if colorDiff > threshold {
+                    coloredPixelCount += 1
+                    rowHasColored = true
+                }
+            }
+            if rowHasColored && firstColoredRow == -1 {
+                firstColoredRow = row
+            }
+        }
+        
+        if coloredPixelCount > 1500, firstColoredRow != -1 {
+            let pillTopFromSearchTop = firstColoredRow
+            let pillTopY = Int(searchRect.origin.y) + pillTopFromSearchTop
+            let pillDistFromBottom = image.height - pillTopY
+            return (true, pillDistFromBottom)
+        }
+        return (false, 0)
+    }
 }

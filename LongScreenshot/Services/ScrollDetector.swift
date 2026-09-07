@@ -40,36 +40,11 @@ public actor ScrollDetector {
             
             let previousImage = frames[i - 1].image
             let currentImage = frames[i].image
-            
-            let h = CGFloat(previousImage.height)
-            let w = CGFloat(previousImage.width)
-            let contentROI = CGRect(x: 0, y: (h * 0.12).rounded(), width: w, height: (h * 0.76).rounded()).integral
-            let prevContent = previousImage.safeCropping(to: contentROI) ?? previousImage
-            let currContent = currentImage.safeCropping(to: contentROI) ?? currentImage
-            
-            let request = VNTranslationalImageRegistrationRequest(
-                targetedCGImage: currContent
+            let (dx, dy, isScrolling) = computeDisplacement(
+                between: previousImage,
+                and: currentImage,
+                sequenceHandler: sequenceHandler
             )
-            
-            do {
-                try sequenceHandler.perform([request], on: prevContent, orientation: .up)
-            } catch {
-                AppLogger.vision.warning("Vision registration failed at frame \(i): \(error.localizedDescription)")
-            }
-            
-            var dy: CGFloat = 0
-            var dx: CGFloat = 0
-            
-            if let result = request.results?.first as? VNImageTranslationAlignmentObservation {
-                let transform = result.alignmentTransform
-                dx = transform.tx
-                dy = -transform.ty
-            }
-            
-            // Criteria for active vertical scroll:
-            // 1. Vertical displacement > 2.0px (ignores subtle jitter)
-            // 2. Horizontal drift < 20.0px (avoids side swiping / page transitions)
-            let isScrolling = abs(dy) > 2.0 && abs(dx) < 20.0
             
             displacements.append(FrameDisplacement(
                 frame: frames[i],
@@ -83,5 +58,47 @@ public actor ScrollDetector {
         }
         
         return displacements
+    }
+    
+    /// Computes translation between two images using an active scroll ROI that excludes dynamic scrollbars and fixed bars
+    public func computeDisplacement(
+        between previousImage: CGImage,
+        and currentImage: CGImage,
+        sequenceHandler: VNSequenceRequestHandler = VNSequenceRequestHandler()
+    ) -> (dx: CGFloat, dy: CGFloat, isScrolling: Bool) {
+        let h = CGFloat(previousImage.height)
+        let w = CGFloat(previousImage.width)
+        let leftMargin = max(4.0, (w * 0.05).rounded())
+        let rightMargin = max(8.0, (w * 0.08).rounded())
+        let cropWidth = max(20.0, w - leftMargin - rightMargin)
+        let contentROI = CGRect(x: leftMargin, y: (h * 0.16).rounded(), width: cropWidth, height: (h * 0.68).rounded()).integral
+        
+        let prevContent = previousImage.safeCropping(to: contentROI) ?? previousImage
+        let currContent = currentImage.safeCropping(to: contentROI) ?? currentImage
+        
+        let request = VNTranslationalImageRegistrationRequest(
+            targetedCGImage: currContent
+        )
+        
+        do {
+            try sequenceHandler.perform([request], on: prevContent, orientation: .up)
+        } catch {
+            AppLogger.vision.warning("Vision registration failed: \(error.localizedDescription)")
+        }
+        
+        var dy: CGFloat = 0
+        var dx: CGFloat = 0
+        
+        if let result = request.results?.first as? VNImageTranslationAlignmentObservation {
+            let transform = result.alignmentTransform
+            dx = transform.tx
+            dy = -transform.ty
+        }
+        
+        // Criteria for active vertical scroll:
+        // 1. Vertical displacement > 1.5px (ignores sensor jitter)
+        // 2. Horizontal drift < 30.0px (avoids side swiping / page transitions)
+        let isScrolling = abs(dy) > 1.5 && abs(dx) < 30.0
+        return (dx, dy, isScrolling)
     }
 }

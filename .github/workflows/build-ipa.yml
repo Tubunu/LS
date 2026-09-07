@@ -71,22 +71,33 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" || true
 
-      - name: Build & Archive iOS App
+      - name: Compile iOS Release App (xcodebuild)
         run: |
-          xcodebuild archive \
+          xcodebuild clean build \
             -project LongScreenshot.xcodeproj \
             -scheme LongScreenshot \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath build/LongScreenshot.xcarchive \
+            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
-      - name: Package IPA
+      - name: Package iOS IPA
         run: |
           mkdir -p build/Payload
-          cp -r build/LongScreenshot.xcarchive/Products/Applications/LongScreenshot.app build/Payload/
+          APP_PATH=$(find build/DerivedData -name "LongScreenshot.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: LongScreenshot.app not found in build/DerivedData"
+            exit 1
+          fi
+          echo "Found compiled app at: $APP_PATH"
+          cp -r "$APP_PATH" build/Payload/
+          
+          # Ad-hoc sign the app bundle for seamless TrollStore / AltStore compatibility
+          codesign --force --deep --sign - build/Payload/LongScreenshot.app || true
+          
           cd build
           zip -r -q "LongScreenshot_Release.ipa" Payload
           cd ..

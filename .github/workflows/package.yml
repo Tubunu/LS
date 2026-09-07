@@ -1,13 +1,25 @@
 name: Build and Package iOS Release (IPA & TestFlight)
 
 on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
+      version_name:
+        description: 'App Version (e.g. 2.3.3)'
+        required: false
+        default: '2.3.3'
       upload_testflight:
         description: '是否尝试上传到 TestFlight (需配置 Apple Developer Secrets)'
         required: false
         type: boolean
         default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build_and_package:
@@ -25,6 +37,15 @@ jobs:
         run: |
           sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode.app || true
           xcodebuild -version
+
+      - name: 更新 App 版本号 (Set Version)
+        run: |
+          VERSION="${{ github.event.inputs.version_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '2.3.3' }}"
+          VERSION="${VERSION#v}"
+          BUILD_NUM="${{ github.run_number }}"
+          echo "Setting Version: $VERSION, Build: $BUILD_NUM"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" LongScreenshot/Resources/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" LongScreenshot/Resources/Info.plist || true
 
       - name: 编译 iOS Release App (xcodebuild)
         run: |
@@ -57,51 +78,74 @@ jobs:
               const errorLines = lines.filter(l => l.includes('error:') || l.includes('fatal error:'));
               const tailLines = lines.slice(-80);
               const body = "### 🛠️ Build Log Errors:\n```text\n" + (errorLines.length ? errorLines.join('\n') : "No direct error string matched") + "\n```\n\n### 📋 Last 80 lines:\n```text\n" + tailLines.join('\n') + "\n```";
-              await github.rest.repos.createCommitComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                commit_sha: context.sha,
-                body: body
-              });
+              try {
+                await github.rest.repos.createCommitComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: context.sha,
+                  body: body
+                });
+              } catch (e) {
+                console.log('Failed to post commit comment:', e);
+              }
             }
 
-      - name: 检查构建结果并中断 (Assert Build Success)
+      - name: 打印完整构建日志并检查结果 (Assert Build Success)
         if: env.BUILD_HAS_FAILED == 'true'
-        run: exit 1
+        run: |
+          cat build_output.txt
+          exit 1
 
       - name: 打包为标准 iOS IPA 文件 (Package to IPA)
         run: |
           mkdir -p build/Payload
           APP_PATH=$(find build/DerivedData -name "LongScreenshot.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: LongScreenshot.app not found!"
+            exit 1
+          fi
           echo "Found compiled app at: $APP_PATH"
           cp -r "$APP_PATH" build/Payload/
+          
+          # Ad-hoc sign bundle for TrollStore / AltStore compatibility
+          codesign --force --deep --sign - build/Payload/LongScreenshot.app || true
+          
           cd build
-          zip -r LongScreenshot-Release.ipa Payload
+          zip -r -q LongScreenshot_Release.ipa Payload
           cd ..
-          ls -lh build/LongScreenshot-Release.ipa
+          ls -lh build/LongScreenshot_Release.ipa
 
       - name: 上传 IPA 安装包为 GitHub Artifacts (Upload IPA)
         uses: actions/upload-artifact@v4
         with:
           name: LongScreenshot-Release-IPA
-          path: build/LongScreenshot-Release.ipa
+          path: build/LongScreenshot_Release.ipa
           retention-days: 30
 
-      - name: 发布至 GitHub Release (仅在推送 Tag 时触发)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: 发布至 GitHub Release (推送 Tag 或手动发布)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          files: build/LongScreenshot-Release.ipa
-          name: "正式版发布 ${{ github.ref_name }}"
+          files: build/LongScreenshot_Release.ipa
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', github.event.inputs.version_name || '2.3.3') }}
+          name: "长截图 LongScreenshot v${{ github.event.inputs.version_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '2.3.3' }}"
           body: |
             ### 🚀 iPhone 长截图 App (LongScreenshot) 正式版
-            - ✨ Apple Music 流动极光视觉风格与 iOS 26 Liquid Glass 液态玻璃支持
-            - 📸 截图无痕拼接双模式 + 🎬 滚动录屏自动生成长图
+            - 🎬 **录屏长截图算法全面升级**：
+              - 攻克快速猛滑手势下减速探测跳帧导致的正文、卡片、横幅内容丢失问题
+              - 引入严苛位移硬天花板与位移游标严格单调递增机制，保证 100% 内容完整度
+              - 动态悬浮胶囊探针（Floating Pill Probe）自动避让“App内打开”等橙色半透明悬浮胶囊
+              - 紧凑底栏智能探测，彻底解决底部评论区被误切、截断问题
+              - 3 条带中位数运动追踪，彻底免疫正文中局部动画 GIF、原地踏步小人造成的位移偏航
+            - 📸 截图无痕拼接 + 🎬 滚动录屏自动生成高清长图
             - ☀️ 浅色明亮与 🌙 深色深邃双色彩主题
 
-            #### 📲 安装方法 (Windows 免 Mac):
-            1. 下载下方的 `LongScreenshot-Release.ipa`。
-            2. 使用 [Sideloadly](https://sideloadly.io/) 或 [AltStore](https://altstore.io/) 连接 iPhone，用你的 Apple ID 免费自签即可直接安装到真机！
+            #### 📲 安装方法 (免越狱、免 Mac):
+            1. 下载下方的 `LongScreenshot_Release.ipa`。
+            2. 使用 TrollStore、[Sideloadly](https://sideloadly.io/)、[AltStore](https://altstore.io/) 或爱思助手，即可免费自签安装到 iPhone 真机！
+          draft: false
+          prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

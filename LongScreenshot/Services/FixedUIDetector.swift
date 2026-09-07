@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import Accelerate
 
 /// Service responsible for automatically detecting stationary UI elements (Status Bar, Navigation Bar, Tab Bar, Floating Action Bar, Home Indicator)
 public actor FixedUIDetector {
